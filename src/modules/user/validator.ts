@@ -35,7 +35,6 @@ export const updateSchema = Joi.object<UpdateUserDTO>({
   email: Joi.string().email(),
   timezone: Joi.string()
     .valid(...validTimezones)
-    .required()
     .messages(invalidTimezoneMsg),
   birthday: Joi.date(),
   active: Joi.boolean(),

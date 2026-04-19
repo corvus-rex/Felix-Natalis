@@ -9,6 +9,7 @@ import { UserService } from './modules/user/service.js';
 import { UserController } from './modules/user/controller.js';
 import { userRouter } from './modules/user/router.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { morganMiddleware } from './middleware/morganMiddleware.js';
 
 let dbClient: IDatabaseClient;
 let uri: string;
@@ -34,6 +35,7 @@ await connectDatabase(dbClient, uri, logger);
 const app = express();
 
 app.use(express.json());
+app.use(morganMiddleware);
 
 const userService = new UserService(userRepo);
 const userController = new UserController(userService);
