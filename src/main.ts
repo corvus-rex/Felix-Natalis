@@ -8,6 +8,7 @@ import { UserRepositoryMongo } from './infrastructure/mongo/user.repository.mong
 import { UserService } from './modules/user/service.js';
 import { UserController } from './modules/user/controller.js';
 import { userRouter } from './modules/user/router.js';
+import { errorHandler } from './middleware/errorHandler.js';
 
 let dbClient: IDatabaseClient;
 let uri: string;
@@ -42,6 +43,8 @@ app.use('/api/v1/users', userRouter(userController));
 app.get('/health', (_, res) => {
   res.json({ status: 'Hello sekai' });
 });
+
+app.use(errorHandler);
 
 app.listen(config.port, () => {
   logger.info(`Server running on port ${config.port}`);
