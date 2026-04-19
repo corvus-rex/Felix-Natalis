@@ -4,7 +4,7 @@
   "description": "Birthday reminder API written in Node/TypeScript",
   "main": "index.js",
   "scripts": {
-    "dev":   "tsx watch src/main.ts",
+    "dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
     "test": "echo \"Test has not been implemented\" && exit 1"
@@ -14,7 +14,8 @@
   "license": "ISC",
   "dependencies": {
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
