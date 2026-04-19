@@ -3,6 +3,20 @@ import { logger } from '../infrastructure/logger.js';
 import { Request, Response, NextFunction } from 'express';
 
 export const errorHandler = (err: any, req: Request, res: Response, next: NextFunction) => {
+
+  if (err instanceof SyntaxError && 'body' in err) {
+    logger.warn('SyntaxError', {
+      message: err.message,
+      path: req.path,
+      method: req.method,
+    });
+
+    return res.status(400).json({
+      error: 'Invalid JSON payload',
+      message: err.message,
+    });
+  }
+
   if (err instanceof UserError) {
     logger.warn('UserError', {
       message: err.message,
