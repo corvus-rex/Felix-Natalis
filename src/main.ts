@@ -2,9 +2,9 @@ import 'dotenv/config';
 import express from 'express';
 import { config } from './config/index.js';
 import { logger } from './infrastructure/logger.js';
-import { DatabaseClient, MongooseClient, connectDatabase } from './infrastructure/db.js';
+import { IDatabaseClient, MongooseClient, connectDatabase } from './infrastructure/db.js';
 
-let dbClient: DatabaseClient;
+let dbClient: IDatabaseClient;
 let uri: string;
 switch (config.dbType) {
   case 'mongodb':

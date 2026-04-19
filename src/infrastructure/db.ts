@@ -1,12 +1,12 @@
 import mongoose from 'mongoose';
 
 // Abstraction for generic database client enables future support for other DBs
-export interface DatabaseClient {
+export interface IDatabaseClient {
   connect(uri: string): Promise<void>;
 }
 
 // Concrete implementation using Mongoose
-export class MongooseClient implements DatabaseClient {
+export class MongooseClient implements IDatabaseClient {
   private options: {
     maxPoolSize: number;
     serverSelectionTimeoutMS: number;
@@ -25,16 +25,16 @@ export class MongooseClient implements DatabaseClient {
 }
 
 // Logger contract (keeps it decoupled from any logging lib)
-export interface Logger {
+export interface ILogger {
   info(message: string): void;
   error?(message: string): void;
 }
 
 // Orchestrator function
 export const connectDatabase = async (
-  client: DatabaseClient,
+  client: IDatabaseClient,
   uri: string,
-  logger: Logger
+  logger: ILogger
 ): Promise<void> => {
   await client.connect(uri);
   logger.info('MongoDB connected');
