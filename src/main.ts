@@ -3,9 +3,16 @@ import express from 'express';
 import { config } from './config/index.js';
 import { logger } from './infrastructure/logger.js';
 import { IDatabaseClient, MongooseClient, connectDatabase } from './infrastructure/db.js';
+import { IUserRepository } from './modules/user/repository.js';
+import { UserRepositoryMongo } from './infrastructure/mongo/user.repository.mongo.js';
+import { UserService } from './modules/user/service.js';
+import { UserController } from './modules/user/controller.js';
+import { userRouter } from './modules/user/router.js';
 
 let dbClient: IDatabaseClient;
 let uri: string;
+let userRepo: IUserRepository;
+
 switch (config.dbType) {
   case 'mongodb':
     logger.info('Using MongoDB as the database');
@@ -14,6 +21,7 @@ switch (config.dbType) {
         serverSelectionTimeoutMS: config.serverTimeout,
     });
     uri = config.mongoUri;
+    userRepo = new UserRepositoryMongo();
     break;
   default:
     logger.error(`Unsupported DB_TYPE: ${config.dbType}`);
@@ -23,6 +31,13 @@ switch (config.dbType) {
 await connectDatabase(dbClient, uri, logger);
 
 const app = express();
+
+app.use(express.json());
+
+const userService = new UserService(userRepo);
+const userController = new UserController(userService);
+app.use('/api/v1/users', userRouter(userController));
+
 
 app.get('/health', (_, res) => {
   res.json({ status: 'Hello sekai' });
