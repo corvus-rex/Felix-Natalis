@@ -8,7 +8,8 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "echo \"Test has not been implemented\" && exit 1"
+    "test": "jest",
+    "test:unit": "jest"
   },
   "keywords": [],
   "author": "",
@@ -23,9 +24,12 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
     "@types/joi": "^17.2.2",
     "@types/morgan": "^1.9.10",
     "@types/node": "^25.6.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }
