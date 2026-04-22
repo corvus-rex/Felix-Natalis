@@ -1,11 +1,12 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { INotificationChannel, NotificationMessage, NotificationRecipient} from '../model.js';
+import { config } from '../../../config/index.js';
 
 export class LogFileChannel implements INotificationChannel {
   private readonly filePath: string;
 
-  constructor(logDir: string = './logs') {
+  constructor(logDir: string = config.channel.logFileDir) {
     this.filePath = path.join(logDir, 'notifications.log');
   }
 

@@ -12,4 +12,7 @@ export const config = {
   dbPoolSize: Number(process.env.DB_POOL_SIZE) || 10,
   serverTimeout: Number(process.env.SERVER_SEL_TIMEOUT) || 5000,
   redisUrl: required('REDIS_URL'),
+  channel : {
+    logFileDir: process.env.LOG_FILE_DIR || '../../logs',
+  },
 };
