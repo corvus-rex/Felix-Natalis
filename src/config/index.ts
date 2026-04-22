@@ -11,4 +11,5 @@ export const config = {
   mongoUri: required('MONGO_URI'),
   dbPoolSize: Number(process.env.DB_POOL_SIZE) || 10,
   serverTimeout: Number(process.env.SERVER_SEL_TIMEOUT) || 5000,
+  redisUrl: required('REDIS_URL'),
 };
