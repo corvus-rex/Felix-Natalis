@@ -1,4 +1,5 @@
 import { IUserRepository } from './repository.js';
+import { IReminderQueue } from '../reminder/model.js';
 import { User, RegisterUserDTO, UpdateUserDTO } from './model.js';
 import { UserError } from './error.js';
 
@@ -14,7 +15,10 @@ export interface IUserService {
 
 // Service Implementation
 export class UserService implements IUserService {
-  constructor(private readonly userRepository: IUserRepository) {}
+  constructor(
+    private readonly userRepository: IUserRepository, 
+    private readonly reminderQueue: IReminderQueue
+  ) {}
 
   async register(data: RegisterUserDTO): Promise<User> {
     const existing = await this.userRepository.findByEmail(data.email);
@@ -75,6 +79,7 @@ export class UserService implements IUserService {
     if (!updated) {
       throw new UserError('User not found', 'NOT_FOUND', 404);
     }
+    await this.reminderQueue.removeBirthdayReminders(id);
   }
   
   async activate(id: string): Promise<void> {
@@ -93,5 +98,6 @@ export class UserService implements IUserService {
     }
 
     await this.userRepository.delete(id);
+    await this.reminderQueue.removeBirthdayReminders(id);
   }
 }

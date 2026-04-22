@@ -11,6 +11,7 @@ export interface ReminderJobData {
 export interface IReminderQueue {
   add(data: ReminderJobData, delay: number, jobId: string): Promise<void>;
   removeJobs(pattern: string): Promise<void>;
+  removeBirthdayReminders(userId: string): Promise<void>;
 }
 
 export class ReminderQueue implements IReminderQueue {
@@ -35,5 +36,8 @@ export class ReminderQueue implements IReminderQueue {
         .filter(job => job.id?.startsWith(pattern.replace('*', '')))
         .map(job => job.remove())
     );
+  }
+  async removeBirthdayReminders(userId: string): Promise<void> {
+    await this.removeJobs(`birthday:${userId}:*`);
   }
 }
