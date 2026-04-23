@@ -15,4 +15,5 @@ export const config = {
   channel : {
     logFileDir: process.env.LOG_FILE_DIR || '../../logs',
   },
+  queueName: process.env.QUEUE_NAME || 'reminder',
 };

@@ -1,11 +1,11 @@
-import { Queue, JobsOptions } from 'bullmq';
+import { Queue, JobsOptions } from 'bullmq'; 
 import { Redis } from 'ioredis'; 
+import { config } from '../../config/index.js';
 
 export interface ReminderJobData {
   reminderId: string;
   userId: string;
-  type: 'birthday';
-  scheduledFor: number;
+  type: 'birthday'; 
 }
 
 export interface IReminderQueue {
@@ -18,7 +18,7 @@ export class ReminderQueue implements IReminderQueue {
   private queue: Queue<ReminderJobData>;
 
   constructor(redis: Redis) {
-    this.queue = new Queue('send-reminder', { connection: redis });
+    this.queue = new Queue(config.queueName, { connection: redis });
   }
 
   async add(data: ReminderJobData, delay: number, jobId: string): Promise<void> {
