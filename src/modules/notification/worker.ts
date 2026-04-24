@@ -2,6 +2,7 @@ import { Worker, QueueEvents } from 'bullmq';
 import type { Redis } from 'ioredis';
 
 import { IUserRepository } from '../user/repository.js';
+import { IReminderRepository } from '../reminder/repository.js';
 import { INotificationService } from '../notification/service.js';
 import { ReminderJobData } from '../reminder/model.js';
 
@@ -11,49 +12,77 @@ import { config } from '../../config/index.js';
 
 export const startWorker = (
   redis: Redis,
-  userRepo: IUserRepository, 
+  userRepo: IUserRepository,
+  reminderRepo: IReminderRepository,
   notificationService: INotificationService,
 ): void => {
-  const worker = new Worker<ReminderJobData>(config.queueName, async (job) => {
-      const { reminderId, userId, type } = job.data;
+
+  const worker = new Worker<ReminderJobData>(
+    config.queueName,
+    async (job) => {
+      const { userId, type, scheduledAt } = job.data;
+      const normalizedScheduledAt = new Date(scheduledAt).toISOString();
 
       // 1. fetch fresh data
       const user = await userRepo.findById(userId);
-
       if (!user) {
-        logger.warn('job skipped: missing user or reminder', {userId, reminderId});
+        logger.warn('job skipped: missing user', { userId, scheduledAt: normalizedScheduledAt });
         return;
       }
 
-      // 2. only handle birthday (future-proofing)
+      // 2. idempotency claim (ensure only one worker processes reminders for the same user+time)
+      const claimed = await reminderRepo.claimReminder(userId, new Date(normalizedScheduledAt));
+
+      if (!claimed) {
+        logger.info('reminder already processed — skipping', {userId, scheduledAt: normalizedScheduledAt});
+        return;
+      }
+
+      // 3. only handle supported type (we could extend with more types in the future)
       if (type !== 'birthday') {
-        logger.warn('unsupported reminder type', { type });
+        logger.warn('unsupported reminder type', { type, userId });
         return;
       }
 
-      // 3. resolve locale
-      const locale = resolveLocaleFromTimezone(user.timezone);
+      try {
+        // 4. resolve locale
+        const locale = resolveLocaleFromTimezone(user.timezone);
 
-      // 4. send notification
-      await notificationService.notifyBirthday({
-          name: user.name,
-          email: user.email,
-        }, 
-        locale);
+        // 5. send notification
+        await notificationService.notifyBirthday(
+          { name: user.name, email: user.email },
+          locale
+        );
 
-      logger.info('birthday reminder sent', {userId, reminderId});
+        logger.info('birthday reminder sent', {
+          userId,
+          scheduledAt: normalizedScheduledAt,
+        });
+
+      } catch (err: any) {
+        logger.error('failed to send birthday reminder', {
+          userId,
+          scheduledAt: normalizedScheduledAt,
+          err,
+        });
+
+        throw err;
+      }
     },
-    { connection: redis }
+    {
+      connection: redis,
+      concurrency: 5,
+    }
   );
 
-  // queue-level failures (job execution errors)
-  const events = new QueueEvents('reminder', { connection: redis });
+  // queue-level failures
+  const events = new QueueEvents(config.queueName, { connection: redis });
 
   events.on('failed', ({ jobId, failedReason }) => {
     logger.error('reminder failed', { jobId, failedReason });
   });
 
-  // worker-level errors (infra issues)
+  // worker-level errors
   worker.on('error', (err) => {
     logger.error('worker error', { err });
   });

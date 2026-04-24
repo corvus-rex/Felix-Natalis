@@ -1,17 +1,17 @@
-import { Queue, JobsOptions } from 'bullmq'; 
-import { Redis } from 'ioredis'; 
+import { Queue } from 'bullmq';
+import { Redis } from 'ioredis';
 import { config } from '../../config/index.js';
 
 export interface ReminderJobData {
-  reminderId: string;
   userId: string;
-  type: 'birthday'; 
+  type: 'birthday';
+  scheduledAt: string; // MUST be ISO string (normalized)
 }
 
 export interface IReminderQueue {
-  add(data: ReminderJobData, delay: number, jobId: string): Promise<void>;
-  removeJobs(pattern: string): Promise<void>;
-  removeBirthdayReminders(userId: string): Promise<void>;
+  add(data: ReminderJobData, delay: number): Promise<void>;
+  removeById(jobId: string): Promise<void>;
+  removeBirthdayReminder(userId: string, scheduledAt: string): Promise<void>;
 }
 
 export class ReminderQueue implements IReminderQueue {
@@ -21,23 +21,42 @@ export class ReminderQueue implements IReminderQueue {
     this.queue = new Queue(config.queueName, { connection: redis });
   }
 
-  async add(data: ReminderJobData, delay: number, jobId: string): Promise<void> {
-    await this.queue.add('send-reminder', data, {
+
+  private buildJobId(data: ReminderJobData): string {
+    const normalized = new Date(data.scheduledAt).toISOString();
+    return `${data.type}:${data.userId}:${normalized}`;
+  }
+
+  async add(data: ReminderJobData, delay: number): Promise<void> {
+    const scheduledAt = new Date(data.scheduledAt).toISOString();
+
+    const normalizedData: ReminderJobData = {
+      ...data,
+      scheduledAt,
+    };
+
+    const jobId = this.buildJobId(normalizedData);
+
+    await this.queue.add('send-reminder', normalizedData, {
       delay,
       jobId,
-      removeOnComplete: true,
+
+      // keep job for a while to preserve dedup
+      removeOnComplete: {
+        age: 3600, // 1 hour
+      },
     });
   }
 
-  async removeJobs(pattern: string): Promise<void> {
-    const jobs = await this.queue.getJobs();
-    await Promise.all(
-      jobs
-        .filter(job => job.id?.startsWith(pattern.replace('*', '')))
-        .map(job => job.remove())
-    );
+  async removeById(jobId: string): Promise<void> {
+    const job = await this.queue.getJob(jobId);
+    if (job) {
+      await job.remove();
+    }
   }
-  async removeBirthdayReminders(userId: string): Promise<void> {
-    await this.removeJobs(`birthday:${userId}:*`);
+
+  async removeBirthdayReminder(userId: string, scheduledAt: string): Promise<void> {
+    const jobId = `birthday:${userId}:${new Date(scheduledAt).toISOString()}`;
+    await this.removeById(jobId);
   }
 }
