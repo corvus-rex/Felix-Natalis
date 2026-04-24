@@ -2,6 +2,7 @@ import { IUserRepository } from './repository.js';
 import { IReminderQueue } from '../reminder/model.js';
 import { User, RegisterUserDTO, UpdateUserDTO } from './model.js';
 import { UserError } from './error.js';
+import { getNextBirthday } from '../reminder/birthdayUtils.js';
 
 // Service contract
 export interface IUserService {
@@ -79,7 +80,7 @@ export class UserService implements IUserService {
     if (!updated) {
       throw new UserError('User not found', 'NOT_FOUND', 404);
     }
-    await this.reminderQueue.removeBirthdayReminders(id);
+    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(updated.birthday));
   }
   
   async activate(id: string): Promise<void> {
@@ -98,6 +99,6 @@ export class UserService implements IUserService {
     }
 
     await this.userRepository.delete(id);
-    await this.reminderQueue.removeBirthdayReminders(id);
+    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(existing.birthday));
   }
 }
