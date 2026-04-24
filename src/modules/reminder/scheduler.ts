@@ -16,21 +16,21 @@ export const startBirthdayScheduler = (
     let lock;
 
     try {
-      lock = await redlock.acquire(['locks:cron:birthday'], 600_000);
+      lock = await redlock.acquire(['locks:cron:birthday'], 60_000);
 
       const now = DateTime.utc();
-      const next12Hours = now.plus({ hours: 12 });
+      const next8Hours = now.plus({ hours: 8 });
 
-      // only fetch users whose next birthday is within next 12 hours
+      // only fetch users whose next birthday is within next 8 hours
       const users = await userRepo.findUsersWithBirthdayBetween(
         now.toJSDate(),
-        next12Hours.toJSDate()
+        next8Hours.toJSDate()
       );
 
       logger.info('birthday scheduler started', {
         count: users.length,
         from: now.toISO(),
-        to: next12Hours.toISO(),
+        to: next8Hours.toISO(),
       });
 
       for (const user of users) {
