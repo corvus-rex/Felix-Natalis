@@ -8,7 +8,7 @@ import path from 'path';
 import os from 'os';
 import { createApp } from '../../src/app.js';
 import { UserRepositoryMongo } from '../../src/infrastructure/mongo/user.repository.mongo.js';
-import { ReminderRepositoryMongo } from '../../src/infrastructure/mongo/reminder.repository.js';
+import { ReminderRepositoryMongo } from '../../src/infrastructure/mongo/reminder.repository.mongo.js';
 import { UserService } from '../../src/modules/user/service.js';
 import { UserController } from '../../src/modules/user/controller.js';
 import { ReminderQueue } from '../../src/modules/reminder/model.js';

@@ -1,4 +1,4 @@
-import { ReminderRepositoryMongo } from '../../../src/infrastructure/mongo/reminder.repository';
+import { ReminderRepositoryMongo } from '../../../src/infrastructure/mongo/reminder.repository.mongo';
 import { startInfra, stopInfra, TestInfra } from '../setup/containers';
 import mongoose from 'mongoose';
 

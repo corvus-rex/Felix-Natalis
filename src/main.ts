@@ -12,7 +12,7 @@ import { userRouter } from './modules/user/router.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { morganMiddleware } from './middleware/morganMiddleware.js';
 import { connectRedis } from './infrastructure/redis.js';
-import { ReminderRepositoryMongo } from './infrastructure/mongo/reminder.repository.js';
+import { ReminderRepositoryMongo } from './infrastructure/mongo/reminder.repository.mongo.js';
 import { ReminderQueue } from './modules/reminder/model.js';
 import { LogFileChannel } from './modules/notification/channel/logfile.js';
 import { NotificationService } from './modules/notification/service.js';
