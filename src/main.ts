@@ -5,15 +5,25 @@ import { logger } from './infrastructure/logger.js';
 import { IDatabaseClient, MongooseClient, connectDatabase } from './infrastructure/db.js';
 import { IUserRepository } from './modules/user/repository.js';
 import { UserRepositoryMongo } from './infrastructure/mongo/user.repository.mongo.js';
+import { IReminderRepository } from './modules/reminder/repository.js';
 import { UserService } from './modules/user/service.js';
 import { UserController } from './modules/user/controller.js';
 import { userRouter } from './modules/user/router.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { morganMiddleware } from './middleware/morganMiddleware.js';
+import { connectRedis } from './infrastructure/redis.js';
+import { ReminderRepositoryMongo } from './infrastructure/mongo/reminder.repository.js';
+import { ReminderQueue } from './modules/reminder/model.js';
+import { LogFileChannel } from './modules/notification/channel/logfile.js';
+import { NotificationService } from './modules/notification/service.js';
+import { startWorker } from './modules/notification/worker.js';
+import { startBirthdayScheduler } from './modules/reminder/scheduler.js';
+import { createRedlock } from './infrastructure/redlock.js';
 
 let dbClient: IDatabaseClient;
 let uri: string;
 let userRepo: IUserRepository;
+let reminderRepo: IReminderRepository;
 
 switch (config.dbType) {
   case 'mongodb':
@@ -24,30 +34,52 @@ switch (config.dbType) {
     });
     uri = config.mongoUri;
     userRepo = new UserRepositoryMongo();
+    reminderRepo = new ReminderRepositoryMongo();
     break;
   default:
     logger.error(`Unsupported DB_TYPE: ${config.dbType}`);
     process.exit(1);
 }
 
+const redis = connectRedis(config.redisUrl);
 await connectDatabase(dbClient, uri, logger);
 
-const app = express();
+const reminderQueue  = new ReminderQueue(redis);
+const logFileChannel = new LogFileChannel(config.channel.logFileDir);
+const notificationSvc = new NotificationService([logFileChannel]);
 
-app.use(express.json());
-app.use(morganMiddleware);
+switch (config.role) {
+  case 'api':
+    logger.info("Starting API server...")
+    const userService = new UserService(userRepo, reminderQueue);
+    const userController = new UserController(userService);
+    const app = express();
 
-const userService = new UserService(userRepo);
-const userController = new UserController(userService);
-app.use('/api/v1/users', userRouter(userController));
+    app.use(express.json());
+    app.use(morganMiddleware);
 
+    app.get('/health', (_, res) => {
+      res.json({ status: 'Hello sekai' });
+    });
+    app.use('/api/v1/users', userRouter(userController));
+    app.use(errorHandler);
+    app.listen(config.port, () => {
+      logger.info(`Server running on port ${config.port}`);
+    });
+    break;
 
-app.get('/health', (_, res) => {
-  res.json({ status: 'Hello sekai' });
-});
+  case 'worker':
+    logger.info('Starting worker...');
+    startWorker(redis, userRepo, reminderRepo, notificationSvc);
+    break;
 
-app.use(errorHandler);
+  case 'scheduler':
+    logger.info('Starting scheduler...');
+    const redlock = createRedlock(redis);
+    startBirthdayScheduler(redlock, userRepo, reminderQueue);
+    break;
 
-app.listen(config.port, () => {
-  logger.info(`Server running on port ${config.port}`);
-});
+  default:
+    logger.error(`Unsupported ROLE: ${config.role}`);
+    process.exit(1);
+}
