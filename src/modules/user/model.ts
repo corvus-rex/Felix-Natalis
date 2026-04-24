@@ -21,6 +21,7 @@ export interface RegisterUserDTO {
 
 export interface InsertUserDTO extends RegisterUserDTO {
   nextBirthDayAt:  Date;
+  active:          boolean;
 }
 
 export interface UpdateUserDTO {

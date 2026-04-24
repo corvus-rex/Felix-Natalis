@@ -34,6 +34,7 @@ export class UserService implements IUserService {
       return await this.userRepository.create({
         ...data,
         nextBirthDayAt: nextBirthdayAt,
+        active: true,
       });
     } catch (err: any) {
       if (err.code === 11000) {

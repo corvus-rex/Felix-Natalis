@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { IUserRepository } from '../../modules/user/repository.js';
-import { User, RegisterUserDTO, UpdateUserDTO } from '../../modules/user/model.js';
+import { User, InsertUserDTO, UpdateUserDTO } from '../../modules/user/model.js';
 
 interface UserDocument extends Document {
   name: string;
@@ -41,7 +41,7 @@ const toUser = (doc: any): User => ({
 });
 
 export class UserRepositoryMongo implements IUserRepository {
-  async create(data: RegisterUserDTO): Promise<User> {
+  async create(data: InsertUserDTO): Promise<User> {
     const doc = await UserModel.create(data);
     return toUser(doc.toObject());
   }
