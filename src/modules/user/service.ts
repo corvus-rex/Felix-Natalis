@@ -72,7 +72,7 @@ export class UserService implements IUserService {
       const birthday = data.birthday ?? existing.birthday;
       const timezone = data.timezone ?? existing.timezone;
 
-      updatePayload.nextBirthdayAt = computeNextBirthdayAt(
+      updatePayload.nextBirthDayAt = computeNextBirthdayAt(
         birthday,
         timezone
       );
