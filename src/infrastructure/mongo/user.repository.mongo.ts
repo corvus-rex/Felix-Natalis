@@ -18,12 +18,14 @@ const schema = new Schema<UserDocument>(
     name: String,
     email: { type: String, unique: true },
     birthday: Date,
-    nextBirthDayAt: { type: Date, index: true },
+    nextBirthDayAt: { type: Date },
     timezone: String,
     active: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
+
+schema.index({ active: 1, nextBirthDayAt: 1 });
 
 const UserModel = mongoose.model<UserDocument>('User', schema);
 
