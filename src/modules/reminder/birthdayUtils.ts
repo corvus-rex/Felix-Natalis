@@ -2,15 +2,17 @@ import { config } from '../../config/index.js';
 import { DateTime } from 'luxon';
 
 export function computeNextBirthdayAt(
-  birthday: Date,
+  birthday: Date | string,
   timezone: string
 ): Date { 
   const now = DateTime.now().setZone(timezone);
  
-  const birth = DateTime.fromJSDate(birthday).setZone(timezone);
+  const birth = birthday instanceof Date
+    ? DateTime.fromJSDate(birthday).setZone(timezone)
+    : DateTime.fromISO(birthday as string).setZone(timezone);
 
   if (!birth.isValid) {
-    throw new Error('Invalid birthday date');
+    throw new Error('Invalid birthday date', );
   }
  
   let next = birth.set({
