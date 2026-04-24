@@ -8,11 +8,11 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "test": "jest",
+    "test:e2e": "jest --testPathPatterns=tests/e2e --runInBand --testTimeout=60000 --detectOpenHandles",
     "test:unit": "jest --testPathPatterns=tests/unit --runInBand",
-    "test:integration": "jest --testPathPatterns=tests/integration --runInBand --testTimeout=60000",
-    "test:integration:user": "jest --testPathPatterns=tests/integration/user --runInBand --testTimeout=60000",
-    "test:integration:reminder": "jest --testPathPatterns=tests/integration/reminder --runInBand --testTimeout=60000"
+    "test:integration": "jest --testPathPatterns=tests/integration --runInBand --testTimeout=60000 --detectOpenHandles",
+    "test:integration:user": "jest --testPathPatterns=tests/integration/user --runInBand --testTimeout=60000 --detectOpenHandles",
+    "test:integration:reminder": "jest --testPathPatterns=tests/integration/reminder --runInBand --testTimeout=60000 --detectOpenHandles"
   },
   "keywords": [],
   "author": "",

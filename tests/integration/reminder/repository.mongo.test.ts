@@ -2,6 +2,8 @@ import { ReminderRepositoryMongo } from '../../../src/infrastructure/mongo/remin
 import { startInfra, stopInfra, TestInfra } from '../setup/containers';
 import mongoose from 'mongoose';
 
+jest.setTimeout(30000);
+
 describe('ReminderRepository (integration)', () => {
   let infra: TestInfra;
   let repo:  ReminderRepositoryMongo;
@@ -11,7 +13,10 @@ describe('ReminderRepository (integration)', () => {
     repo  = new ReminderRepositoryMongo();
   });
 
-  afterAll(async () => stopInfra(infra));
+  afterAll(async () => {
+    await mongoose.disconnect();
+    await stopInfra(infra);
+  });
 
   afterEach(async () => {
     await mongoose.connection.collection('reminderlogs').deleteMany({});

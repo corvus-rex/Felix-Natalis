@@ -2,6 +2,9 @@ import { Queue } from 'bullmq';
 import { ReminderQueue } from '../../../src/modules/reminder/model';
 import { startInfra, stopInfra, TestInfra } from '../setup/containers';
 import { config } from '../../../src/config/index.js';
+import mongoose from 'mongoose';
+
+jest.setTimeout(30000);
 
 describe('ReminderQueue (integration)', () => {
   let infra:  TestInfra;
@@ -17,6 +20,7 @@ describe('ReminderQueue (integration)', () => {
   afterAll(async () => {
     await rawQueue.close();
     await stopInfra(infra);
+    await mongoose.disconnect();
   });
 
   afterEach(async () => {

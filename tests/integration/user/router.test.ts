@@ -5,7 +5,8 @@ import { UserRepositoryMongo } from '../../../src/infrastructure/mongo/user.repo
 import { UserService } from '../../../src/modules/user/service';
 import { UserController } from '../../../src/modules/user/controller';
 import { startInfra, stopInfra, TestInfra } from '../setup/containers';
-import { logger } from '../../../src/infrastructure/logger';
+
+jest.setTimeout(30000);
 
  const mockQueue = {
   add: jest.fn(),
@@ -25,7 +26,10 @@ describe('User Routes (integration)', () => {
     app           = createApp(ctrl);
   });
 
-  afterAll(async () => stopInfra(infra));
+  afterAll(async () => {
+    await mongoose.disconnect();
+    await stopInfra(infra);
+  });
 
   afterEach(async () => {
     await mongoose.connection.collection('users').deleteMany({});

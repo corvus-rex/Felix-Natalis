@@ -37,6 +37,7 @@ const MOCK_NEXT_BIRTHDAY = new Date('2026-12-07T19:00:00.000Z');
 const insertPayload = {
   ...registerPayload,
   nextBirthDayAt: MOCK_NEXT_BIRTHDAY,
+  active: true,
 };
 
 // ─────────────────────────────────────────────
@@ -127,10 +128,7 @@ describe('UserService', () => {
         registerPayload.timezone
       );
 
-      expect(mockRepo.create).toHaveBeenCalledWith({
-        ...registerPayload,
-        nextBirthDayAt: MOCK_NEXT_BIRTHDAY,
-      });
+      expect(mockRepo.create).toHaveBeenCalledWith(insertPayload);
     });
 
     it('should throw DUPLICATE_EMAIL (409) on MongoDB duplicate key error (code 11000)', async () => {
@@ -275,7 +273,7 @@ describe('UserService', () => {
       );
       expect(mockRepo.update).toHaveBeenCalledWith(
         'userid-123',
-        expect.objectContaining({ nextBirthdayAt: MOCK_NEXT_BIRTHDAY })
+        expect.objectContaining({ nextBirthDayAt: MOCK_NEXT_BIRTHDAY })
       );
     });
 

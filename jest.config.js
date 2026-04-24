@@ -5,7 +5,8 @@ export default {
 
   testMatch: [
     '**/tests/unit/**/*.test.ts', 
-    '**/tests/integration/**/*.test.ts'
+    '**/tests/integration/**/*.test.ts',
+    '**/tests/e2e/**/*.test.ts'
   ],
   clearMocks: true,
   roots: ['<rootDir>/tests'],

@@ -2,6 +2,8 @@ import { UserRepositoryMongo } from '../../../src/infrastructure/mongo/user.repo
 import { startInfra, stopInfra, TestInfra } from '../setup/containers';
 import mongoose from 'mongoose';
 
+jest.setTimeout(30000);
+
 describe('UserRepository (integration)', () => {
   let infra: TestInfra;
   let repo: UserRepositoryMongo;
@@ -13,6 +15,7 @@ describe('UserRepository (integration)', () => {
 
   afterAll(async () => {
     await stopInfra(infra);
+    await mongoose.disconnect();
   });
 
   afterEach(async () => {

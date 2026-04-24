@@ -39,6 +39,9 @@ export const startInfra = async (): Promise<TestInfra> => {
 export const stopInfra = async (infra: TestInfra): Promise<void> => {
   await infra.mongoose.disconnect();
   await infra.redisClient.quit();
-  await infra.mongoContainer.stop();
-  await infra.redisContainer.stop();
+  await new Promise(resolve => setTimeout(resolve, 500));
+  await Promise.all([
+    infra.mongoContainer.stop(),
+    infra.redisContainer.stop(),
+  ]);
 };
