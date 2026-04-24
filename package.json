@@ -1,6 +1,6 @@
 {
   "name": "felix-natalis",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Birthday reminder API written in Node/TypeScript",
   "main": "index.js",
   "type": "module",
