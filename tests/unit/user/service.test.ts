@@ -1,11 +1,15 @@
 import { UserService } from '../../../src/modules/user/service';
 import { IUserRepository } from '../../../src/modules/user/repository';
+import { IReminderQueue } from '../../../src/modules/reminder/model';
 import { UserError } from '../../../src/modules/user/error';
 import { User } from '../../../src/modules/user/model';
+import * as birthdayUtils from '../../../src/modules/reminder/birthdayUtils';
+import { remove } from 'winston';
 
 // ─────────────────────────────────────────────
 // Shared Fixtures
 // ─────────────────────────────────────────────
+const FIXED_NOW = new Date('2026-04-24T08:25:55.557Z');
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'userid-123',
@@ -14,8 +18,9 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   birthday: new Date('1989-12-07'),
   timezone: 'Asia/Tokyo',
   active: true,
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  nextBirthDayAt: new Date('2026-12-07T09:00:00.000Z'),
+  createdAt: FIXED_NOW,
+  updatedAt: FIXED_NOW,
   ...overrides,
 });
 
@@ -26,12 +31,21 @@ const registerPayload = {
   timezone: 'Asia/Tokyo',
 };
 
+const MOCK_NEXT_BIRTHDAY = new Date('2026-12-07T19:00:00.000Z');
+
+
+const insertPayload = {
+  ...registerPayload,
+  nextBirthDayAt: MOCK_NEXT_BIRTHDAY,
+};
+
 // ─────────────────────────────────────────────
 // Test Suite
 // ─────────────────────────────────────────────
 
 describe('UserService', () => {
   let mockRepo: jest.Mocked<IUserRepository>;
+  let mockQueue: jest.Mocked<IReminderQueue>;
   let service: UserService;
 
   beforeEach(() => {
@@ -42,9 +56,22 @@ describe('UserService', () => {
       findActive: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      findUsersWithBirthdayBetween: jest.fn(),
     };
 
-    service = new UserService(mockRepo);
+    mockQueue = {
+      add: jest.fn(),
+      removeById: jest.fn(),
+      removeBirthdayReminder: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // Spy on computeNextBirthdayAt so we control its output
+    // and can assert it was called correctly
+    jest
+      .spyOn(birthdayUtils, 'computeNextBirthdayAt')
+      .mockReturnValue(MOCK_NEXT_BIRTHDAY);
+
+    service = new UserService(mockRepo, mockQueue);
   });
 
   afterEach(() => {
@@ -64,7 +91,7 @@ describe('UserService', () => {
       const result = await service.register(registerPayload);
 
       expect(mockRepo.findByEmail).toHaveBeenCalledWith('gojo@test.com');
-      expect(mockRepo.create).toHaveBeenCalledWith(registerPayload);
+      expect(mockRepo.create).toHaveBeenCalledWith(insertPayload); 
       expect(result).toEqual(createdUser);
     });
 
@@ -77,7 +104,6 @@ describe('UserService', () => {
         status: 409,
       });
 
-      // create should never be called
       expect(mockRepo.create).not.toHaveBeenCalled();
     });
 
@@ -87,9 +113,45 @@ describe('UserService', () => {
       mockRepo.create.mockRejectedValue(networkError);
 
       await expect(service.register(registerPayload)).rejects.toThrow('DB connection timeout');
-
-      // Confirm it is NOT wrapped in UserError
       await expect(service.register(registerPayload)).rejects.not.toBeInstanceOf(UserError);
+    });
+
+    it('should compute nextBirthdayAt and pass it to create', async () => {
+      mockRepo.findByEmail.mockResolvedValue(null);
+      mockRepo.create.mockResolvedValue(makeUser());
+
+      await service.register(registerPayload);
+
+      expect(birthdayUtils.computeNextBirthdayAt).toHaveBeenCalledWith(
+        registerPayload.birthday,
+        registerPayload.timezone
+      );
+
+      expect(mockRepo.create).toHaveBeenCalledWith({
+        ...registerPayload,
+        nextBirthDayAt: MOCK_NEXT_BIRTHDAY,
+      });
+    });
+
+    it('should throw DUPLICATE_EMAIL (409) on MongoDB duplicate key error (code 11000)', async () => {
+      const mongoError = Object.assign(new Error('duplicate key'), { code: 11000 });
+      mockRepo.findByEmail.mockResolvedValue(null);
+      mockRepo.create.mockRejectedValue(mongoError);
+
+      await expect(service.register(registerPayload)).rejects.toMatchObject({
+        code: 'DUPLICATE_EMAIL',
+        status: 409,
+      });
+    });
+
+    it('should not wrap non-11000 DB errors as DUPLICATE_EMAIL', async () => {
+      const otherDbError = Object.assign(new Error('write conflict'), { code: 112 });
+      mockRepo.findByEmail.mockResolvedValue(null);
+      mockRepo.create.mockRejectedValue(otherDbError);
+
+      await expect(service.register(registerPayload)).rejects.not.toMatchObject({
+        code: 'DUPLICATE_EMAIL',
+      });
     });
   });
 
@@ -166,7 +228,6 @@ describe('UserService', () => {
       mockRepo.findById.mockResolvedValue(existing);
       mockRepo.update.mockResolvedValue(existing);
 
-      // Passing the same email that the user already has
       await service.update('userid-123', { email: 'gojo@test.com' });
 
       expect(mockRepo.findByEmail).not.toHaveBeenCalled();
@@ -176,7 +237,7 @@ describe('UserService', () => {
       const existing = makeUser();
       const updated = makeUser({ email: 'new@test.com' });
       mockRepo.findById.mockResolvedValue(existing);
-      mockRepo.findByEmail.mockResolvedValue(null); // new email is free
+      mockRepo.findByEmail.mockResolvedValue(null);
       mockRepo.update.mockResolvedValue(updated);
 
       const result = await service.update('userid-123', { email: 'new@test.com' });
@@ -193,6 +254,69 @@ describe('UserService', () => {
         code: 'UPDATE_FAILED',
         status: 500,
       });
+    });
+
+ 
+    it('should recompute nextBirthdayAt and remove old reminder when birthday changes', async () => {
+      const existing = makeUser();
+      const updated = makeUser({ birthday: new Date('1989-12-08') });
+      mockRepo.findById.mockResolvedValue(existing);
+      mockRepo.update.mockResolvedValue(updated);
+
+      await service.update('userid-123', { birthday: new Date('1989-12-08') });
+
+      expect(birthdayUtils.computeNextBirthdayAt).toHaveBeenCalledWith(
+        new Date('1989-12-08'),
+        existing.timezone 
+      );
+      expect(mockQueue.removeBirthdayReminder).toHaveBeenCalledWith(
+        'userid-123',
+        existing.nextBirthDayAt.toISOString()
+      );
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        'userid-123',
+        expect.objectContaining({ nextBirthdayAt: MOCK_NEXT_BIRTHDAY })
+      );
+    });
+
+    it('should recompute nextBirthdayAt and remove old reminder when timezone changes', async () => {
+      const existing = makeUser();
+      const updated = makeUser({ timezone: 'America/New_York' });
+      mockRepo.findById.mockResolvedValue(existing);
+      mockRepo.update.mockResolvedValue(updated);
+
+      await service.update('userid-123', { timezone: 'America/New_York' });
+
+      expect(birthdayUtils.computeNextBirthdayAt).toHaveBeenCalledWith(
+        existing.birthday, 
+        'America/New_York'
+      );
+      expect(mockQueue.removeBirthdayReminder).toHaveBeenCalledWith(
+        'userid-123',
+        existing.nextBirthDayAt.toISOString()
+      );
+    });
+
+    it('should NOT recompute nextBirthdayAt or remove reminder for unrelated field updates', async () => {
+      const existing = makeUser();
+      mockRepo.findById.mockResolvedValue(existing);
+      mockRepo.update.mockResolvedValue(makeUser({ name: 'New Name' }));
+
+      await service.update('userid-123', { name: 'New Name' });
+
+      expect(birthdayUtils.computeNextBirthdayAt).not.toHaveBeenCalled();
+      expect(mockQueue.removeBirthdayReminder).not.toHaveBeenCalled();
+    });
+
+    it('should NOT call update if removeBirthdayReminder throws', async () => {
+      mockRepo.findById.mockResolvedValue(makeUser());
+      mockQueue.removeBirthdayReminder.mockRejectedValue(new Error('Redis down'));
+
+      await expect(
+        service.update('userid-123', { birthday: new Date('1989-12-08') })
+      ).rejects.toThrow('Redis down');
+
+      expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });
 
@@ -224,6 +348,30 @@ describe('UserService', () => {
 
       expect(mockRepo.update).toHaveBeenCalledWith('userid-123', { active: false });
     });
+
+    // ── new: queue cleanup ───────────────────
+
+    it('should remove birthday reminder after deactivating', async () => {
+      const deactivated = makeUser({ active: false });
+      mockRepo.update.mockResolvedValue(deactivated);
+
+      await service.deactivate('userid-123');
+
+      expect(mockQueue.removeBirthdayReminder).toHaveBeenCalledWith(
+        'userid-123',
+        deactivated.nextBirthDayAt.toISOString()
+      );
+    });
+
+    it('should NOT remove reminder if update returns null (user not found)', async () => {
+      mockRepo.update.mockResolvedValue(null);
+
+      await expect(service.deactivate('ghost-id')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+
+      expect(mockQueue.removeBirthdayReminder).not.toHaveBeenCalled();
+    });
   });
 
   // ───────────────────────────────────────────
@@ -253,6 +401,16 @@ describe('UserService', () => {
       await service.activate('userid-123');
 
       expect(mockRepo.update).toHaveBeenCalledWith('userid-123', { active: true });
+    });
+
+    // ── new: queue not touched on activate ──
+
+    it('should NOT call removeBirthdayReminder on activate', async () => {
+      mockRepo.update.mockResolvedValue(makeUser({ active: true }));
+
+      await service.activate('userid-123');
+
+      expect(mockQueue.removeBirthdayReminder).not.toHaveBeenCalled();
     });
   });
 
@@ -286,6 +444,40 @@ describe('UserService', () => {
 
       await expect(service.delete('user-123')).rejects.toThrow('DB down');
       expect(mockRepo.delete).not.toHaveBeenCalled();
+    });
+
+    // ── new: queue cleanup ───────────────────
+
+    it('should remove birthday reminder after deleting', async () => {
+      const existing = makeUser();
+      mockRepo.findById.mockResolvedValue(existing);
+      mockRepo.delete.mockResolvedValue(undefined);
+
+      await service.delete('userid-123');
+
+      expect(mockQueue.removeBirthdayReminder).toHaveBeenCalledWith(
+        'userid-123',
+        existing.nextBirthDayAt.toISOString()
+      );
+    });
+
+    it('should NOT remove reminder if user is not found', async () => {
+      mockRepo.findById.mockResolvedValue(null);
+
+      await expect(service.delete('ghost-id')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+
+      expect(mockQueue.removeBirthdayReminder).not.toHaveBeenCalled();
+    });
+
+    it('should NOT call removeBirthdayReminder if delete throws', async () => {
+      mockRepo.findById.mockResolvedValue(makeUser());
+      mockRepo.delete.mockRejectedValue(new Error('DB down'));
+
+      await expect(service.delete('userid-123')).rejects.toThrow('DB down');
+
+      expect(mockQueue.removeBirthdayReminder).not.toHaveBeenCalled();
     });
   });
 });

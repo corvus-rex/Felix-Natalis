@@ -17,6 +17,9 @@ export interface RegisterUserDTO {
   email:           string;
   birthday:        Date;
   timezone:        string;
+}
+
+export interface InsertUserDTO extends RegisterUserDTO {
   nextBirthDayAt:  Date;
 }
 

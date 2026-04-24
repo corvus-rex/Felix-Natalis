@@ -1,7 +1,7 @@
-import { User, RegisterUserDTO, UpdateUserDTO } from './model.js';
+import { User, InsertUserDTO, UpdateUserDTO } from './model.js';
 
 export interface IUserRepository {
-  create(data: RegisterUserDTO): Promise<User>;
+  create(data: InsertUserDTO): Promise<User>;
   findById(id: string): Promise<User | null>;
   findByEmail(email: string): Promise<User | null>;
   findActive(): Promise<User[]>;
