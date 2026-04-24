@@ -24,7 +24,9 @@ export class ReminderQueue implements IReminderQueue {
 
   private buildJobId(data: ReminderJobData): string {
     const normalized = new Date(data.scheduledAt).toISOString();
-    return `${data.type}:${data.userId}:${normalized}`;
+    // Replace : in ISO string (e.g. 2025-12-07T00_00_00.000Z)
+    const safeTimestamp = normalized.replace(/:/g, '_');
+    return `${data.type}_${data.userId}_${safeTimestamp}`;
   }
 
   async add(data: ReminderJobData, delay: number): Promise<void> {
@@ -56,7 +58,11 @@ export class ReminderQueue implements IReminderQueue {
   }
 
   async removeBirthdayReminder(userId: string, scheduledAt: string): Promise<void> {
-    const jobId = `birthday:${userId}:${new Date(scheduledAt).toISOString()}`;
+    const jobId = this.buildJobId({
+      userId,
+      type: 'birthday',
+      scheduledAt,
+    });
     await this.removeById(jobId);
   }
 }
