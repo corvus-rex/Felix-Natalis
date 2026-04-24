@@ -95,8 +95,6 @@ describe('User Routes (integration)', () => {
         .post(registerEndpoint)
         .send(validPayload);
 
-      console.log('Created user with ID:', created);
-
       const res = await supertest(app)
         .get(`/api/v1/users/${created.body.id}`);
 
