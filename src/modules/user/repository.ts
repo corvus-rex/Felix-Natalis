@@ -7,4 +7,5 @@ export interface IUserRepository {
   findActive(): Promise<User[]>;
   update(id: string, fields: UpdateUserDTO): Promise<User | null>;
   delete(id: string): Promise<void>;
+  findUsersWithBirthdayBetween(from: Date, to: Date): Promise<User[]>;
 }

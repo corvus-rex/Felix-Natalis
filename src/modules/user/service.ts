@@ -2,7 +2,7 @@ import { IUserRepository } from './repository.js';
 import { IReminderQueue } from '../reminder/model.js';
 import { User, RegisterUserDTO, UpdateUserDTO } from './model.js';
 import { UserError } from './error.js';
-import { getNextBirthday } from '../reminder/birthdayUtils.js';
+import { computeNextBirthdayAt } from '../reminder/birthdayUtils.js';
 
 // Service contract
 export interface IUserService {
@@ -28,8 +28,13 @@ export class UserService implements IUserService {
       throw new UserError('Email already registered', 'DUPLICATE_EMAIL', 409);
     }
 
+    const nextBirthdayAt = computeNextBirthdayAt(data.birthday, data.timezone);
+
     try {
-      return await this.userRepository.create(data);
+      return await this.userRepository.create({
+        ...data,
+        nextBirthDayAt: nextBirthdayAt,
+      });
     } catch (err: any) {
       if (err.code === 11000) {
         throw new UserError('Email already registered', 'DUPLICATE_EMAIL', 409);
@@ -47,15 +52,12 @@ export class UserService implements IUserService {
 
     return user;
   }
-
   async update(id: string, data: UpdateUserDTO): Promise<User> {
-    // 1. Ensure user exists
     const existing = await this.userRepository.findById(id);
     if (!existing) {
       throw new UserError('User not found', 'NOT_FOUND', 404);
     }
 
-    // 2. Optional: enforce unique email if updating email
     if (data.email && data.email !== existing.email) {
       const emailTaken = await this.userRepository.findByEmail(data.email);
       if (emailTaken) {
@@ -63,10 +65,20 @@ export class UserService implements IUserService {
       }
     }
 
-    // 3. Perform update
-    const updated = await this.userRepository.update(id, data);
+    const updatePayload: any = { ...data };
+ 
+    if (data.birthday || data.timezone) {
+      const birthday = data.birthday ?? existing.birthday;
+      const timezone = data.timezone ?? existing.timezone;
 
-    // If update fail on repository level, throw internal service error
+      updatePayload.nextBirthdayAt = computeNextBirthdayAt(
+        birthday,
+        timezone
+      );
+    }
+
+    const updated = await this.userRepository.update(id, updatePayload);
+
     if (!updated) {
       throw new UserError('Failed to update user', 'UPDATE_FAILED', 500);
     }
@@ -80,7 +92,7 @@ export class UserService implements IUserService {
     if (!updated) {
       throw new UserError('User not found', 'NOT_FOUND', 404);
     }
-    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(updated.birthday, updated.timezone));
+    await this.reminderQueue.removeBirthdayReminder(id, updated.nextBirthDayAt.toISOString());
   }
   
   async activate(id: string): Promise<void> {
@@ -99,6 +111,6 @@ export class UserService implements IUserService {
     }
 
     await this.userRepository.delete(id);
-    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(existing.birthday, existing.timezone));
+    await this.reminderQueue.removeBirthdayReminder(id, existing.nextBirthDayAt.toISOString());
   }
 }

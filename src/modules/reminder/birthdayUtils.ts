@@ -1,16 +1,18 @@
-import { DateTime } from 'luxon';
 import { config } from '../../config/index.js';
+import { DateTime } from 'luxon';
 
-export function getNextBirthday(
-  birthDate: Date,
+export function computeNextBirthdayAt(
+  birthday: Date,
   timezone: string
-): string {
+): Date { 
   const now = DateTime.now().setZone(timezone);
+ 
+  const birth = DateTime.fromJSDate(birthday).setZone(timezone);
 
-  const birth = DateTime.fromJSDate(birthDate).setZone(timezone);
-
-  // set this year's birthday at xx:00 local time
-  // x equal to config value (e.g. 9 for 9:00 AM)
+  if (!birth.isValid) {
+    throw new Error('Invalid birthday date');
+  }
+ 
   let next = birth.set({
     year: now.year,
     hour: config.birthdayHour,
@@ -24,8 +26,9 @@ export function getNextBirthday(
     next = next.plus({ years: 1 });
   }
 
-  const iso = next.toUTC().toISO();
-  if (!iso) throw new Error('Invalid DateTime in getNextBirthday');
-
-  return iso;
+  if (!next.isValid) {
+    throw new Error('Invalid computed birthday');
+  }
+ 
+  return next.toUTC().toJSDate();
 }

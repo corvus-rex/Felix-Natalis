@@ -6,6 +6,7 @@ interface UserDocument extends Document {
   name: string;
   email: string;
   birthday: Date;
+  nextBirthDayAt: Date;
   timezone: string;
   active: boolean;
   createdAt: Date;
@@ -17,6 +18,7 @@ const schema = new Schema<UserDocument>(
     name: String,
     email: { type: String, unique: true },
     birthday: Date,
+    nextBirthDayAt: { type: Date, index: true },
     timezone: String,
     active: { type: Boolean, default: true },
   },
@@ -31,6 +33,7 @@ const toUser = (doc: any): User => ({
   name: doc.name,
   email: doc.email,
   birthday: doc.birthday,
+  nextBirthDayAt: doc.nextBirthDayAt,
   timezone: doc.timezone,
   active: doc.active,
   createdAt: doc.createdAt,
@@ -70,5 +73,17 @@ export class UserRepositoryMongo implements IUserRepository {
 
   async delete(id: string): Promise<void> {
     await UserModel.findByIdAndDelete(id);
+  }
+
+  async findUsersWithBirthdayBetween(from: Date, to: Date): Promise<User[]> {
+    const docs = await UserModel.find({
+      active: true,
+      nextBirthdayAt: {
+        $gte: from,
+        $lte: to,
+      },
+    }).sort({ nextBirthdayAt: 1 }).lean();
+
+    return docs.map(toUser);
   }
 }
