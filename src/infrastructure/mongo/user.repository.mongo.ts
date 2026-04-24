@@ -78,11 +78,11 @@ export class UserRepositoryMongo implements IUserRepository {
   async findUsersWithBirthdayBetween(from: Date, to: Date): Promise<User[]> {
     const docs = await UserModel.find({
       active: true,
-      nextBirthdayAt: {
+      nextBirthDayAt: {
         $gte: from,
         $lte: to,
       },
-    }).sort({ nextBirthdayAt: 1 }).lean();
+    }).sort({ nextBirthDayAt: 1 }).lean();
 
     return docs.map(toUser);
   }
