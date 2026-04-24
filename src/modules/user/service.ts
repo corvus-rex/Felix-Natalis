@@ -80,7 +80,7 @@ export class UserService implements IUserService {
     if (!updated) {
       throw new UserError('User not found', 'NOT_FOUND', 404);
     }
-    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(updated.birthday));
+    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(updated.birthday, updated.timezone));
   }
   
   async activate(id: string): Promise<void> {
@@ -99,6 +99,6 @@ export class UserService implements IUserService {
     }
 
     await this.userRepository.delete(id);
-    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(existing.birthday));
+    await this.reminderQueue.removeBirthdayReminder(id, getNextBirthday(existing.birthday, existing.timezone));
   }
 }

@@ -16,4 +16,5 @@ export const config = {
     logFileDir: process.env.LOG_FILE_DIR || '../../logs',
   },
   queueName: process.env.QUEUE_NAME || 'reminder',
+  birthdayHour: parseInt(process.env.BIRTHDAY_HOUR || '9'),
 };
