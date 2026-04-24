@@ -1,4 +1,3 @@
-// tests/integration/reminder/reminder.repository.test.ts
 import { ReminderRepositoryMongo } from '../../../src/infrastructure/mongo/reminder.repository';
 import { startInfra, stopInfra, TestInfra } from '../setup/containers';
 import mongoose from 'mongoose';
