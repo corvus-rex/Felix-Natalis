@@ -9,6 +9,7 @@ import { ReminderJobData } from '../reminder/model.js';
 import { resolveLocaleFromTimezone } from '../notification/builder/birthday/locale/index.js';
 import { logger } from '../../infrastructure/logger.js';
 import { config } from '../../config/index.js';
+import { DateTime } from 'luxon';
 
 export const startWorker = (
   redis: Redis,
@@ -53,10 +54,19 @@ export const startWorker = (
           { name: user.name, email: user.email },
           locale
         );
+        
+        // 6. advance nextBirthDayAt to next year — must happen after successful send
+        const nextBirthday = DateTime
+          .fromJSDate(user.nextBirthDayAt)
+          .plus({ years: 1 })
+          .toJSDate();
+
+        await userRepo.update(userId, { nextBirthDayAt: nextBirthday });
 
         logger.info('birthday reminder sent', {
           userId,
-          scheduledAt: normalizedScheduledAt,
+          scheduledAt:    normalizedScheduledAt,
+          nextBirthDayAt: nextBirthday.toISOString(),
         });
 
       } catch (err: any) {
