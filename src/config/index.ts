@@ -5,16 +5,17 @@ const required = (key: string): string => {
 };
 
 export const config = {
-  port:    parseInt(process.env.PORT || '3000'),
-  dbType: required('DB_TYPE'),
-  dbName: required('DB_NAME'),
-  mongoUri: required('MONGO_URI'),
-  dbPoolSize: Number(process.env.DB_POOL_SIZE) || 10,
+  role:          (process.env.ROLE as 'api' | 'worker' | 'scheduler') || 'api',
+  port:          parseInt(process.env.PORT || '3000'),
+  dbType:        required('DB_TYPE'),
+  dbName:        required('DB_NAME'),
+  mongoUri:      required('MONGO_URI'),
+  dbPoolSize:    Number(process.env.DB_POOL_SIZE) || 10,
   serverTimeout: Number(process.env.SERVER_SEL_TIMEOUT) || 5000,
-  redisUrl: required('REDIS_URL'),
+  redisUrl:      required('REDIS_URL'),
   channel : {
-    logFileDir: process.env.LOG_FILE_DIR || '../../logs',
+    logFileDir:  process.env.LOG_FILE_DIR || '../../logs',
   },
-  queueName: process.env.QUEUE_NAME || 'reminder',
-  birthdayHour: parseInt(process.env.BIRTHDAY_HOUR || '9'),
+  queueName:     process.env.QUEUE_NAME || 'reminder',
+  birthdayHour:  parseInt(process.env.BIRTHDAY_HOUR || '9'),
 };
