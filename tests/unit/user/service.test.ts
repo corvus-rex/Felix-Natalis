@@ -349,8 +349,7 @@ describe('UserService', () => {
       expect(mockRepo.update).toHaveBeenCalledWith('userid-123', { active: false });
     });
 
-    // ── new: queue cleanup ───────────────────
-
+ 
     it('should remove birthday reminder after deactivating', async () => {
       const deactivated = makeUser({ active: false });
       mockRepo.update.mockResolvedValue(deactivated);
@@ -403,8 +402,7 @@ describe('UserService', () => {
       expect(mockRepo.update).toHaveBeenCalledWith('userid-123', { active: true });
     });
 
-    // ── new: queue not touched on activate ──
-
+ 
     it('should NOT call removeBirthdayReminder on activate', async () => {
       mockRepo.update.mockResolvedValue(makeUser({ active: true }));
 
@@ -446,8 +444,7 @@ describe('UserService', () => {
       expect(mockRepo.delete).not.toHaveBeenCalled();
     });
 
-    // ── new: queue cleanup ───────────────────
-
+ 
     it('should remove birthday reminder after deleting', async () => {
       const existing = makeUser();
       mockRepo.findById.mockResolvedValue(existing);
