@@ -19,6 +19,7 @@ import { NotificationService } from './modules/notification/service.js';
 import { startWorker } from './modules/notification/worker.js';
 import { startBirthdayScheduler } from './modules/reminder/scheduler.js';
 import { createRedlock } from './infrastructure/redlock.js';
+import { createApp } from './app.js';
 
 let dbClient: IDatabaseClient;
 let uri: string;
@@ -50,19 +51,10 @@ const notificationSvc = new NotificationService([logFileChannel]);
 
 switch (config.role) {
   case 'api':
-    logger.info("Starting API server...")
-    const userService = new UserService(userRepo, reminderQueue);
+    logger.info('Starting API server...');
+    const userService    = new UserService(userRepo, reminderQueue);
     const userController = new UserController(userService);
-    const app = express();
-
-    app.use(express.json());
-    app.use(morganMiddleware);
-
-    app.get('/health', (_, res) => {
-      res.json({ status: 'Hello sekai' });
-    });
-    app.use('/api/v1/users', userRouter(userController));
-    app.use(errorHandler);
+    const app            = createApp(userController); 
     app.listen(config.port, () => {
       logger.info(`Server running on port ${config.port}`);
     });
