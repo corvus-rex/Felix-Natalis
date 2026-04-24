@@ -75,6 +75,7 @@ export class UserService implements IUserService {
         birthday,
         timezone
       );
+      await this.reminderQueue.removeBirthdayReminder(id, existing.nextBirthDayAt.toISOString());
     }
 
     const updated = await this.userRepository.update(id, updatePayload);
