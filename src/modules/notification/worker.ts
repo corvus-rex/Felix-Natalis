@@ -8,6 +8,7 @@ import { resolveLocaleFromTimezone } from '../notification/builder/birthday/loca
 import { logger }                from '../../infrastructure/logger.js';
 import { config }                from '../../config/index.js';
 import { DateTime }              from 'luxon';
+import { computeNextBirthdayAt } from '../reminder/birthdayUtils.js';
 
 export class ReminderJobProcessor {
   constructor(
@@ -54,13 +55,9 @@ export class ReminderJobProcessor {
       );
 
       // 6. advance nextBirthDayAt
-      const nextBirthday = DateTime
-        .fromJSDate(user.nextBirthDayAt)
-        .plus({ years: 1 })
-        .toJSDate();
+      const nextBirthday = computeNextBirthdayAt(user.birthday, user.timezone);
 
       await this.userRepo.update(userId, { nextBirthDayAt: nextBirthday });
-
       logger.info('birthday reminder sent', {
         userId,
         scheduledAt:    normalizedScheduledAt,
