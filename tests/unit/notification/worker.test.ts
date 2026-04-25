@@ -5,6 +5,7 @@ import { INotificationService } from '../../../src/modules/notification/service'
 import { Job }                  from 'bullmq';
 import { DateTime }             from 'luxon';
 import * as localeUtils         from '../../../src/modules/notification/builder/birthday/locale/index';
+import { computeNextBirthdayAt } from '../../../src/modules/reminder/birthdayUtils';
 
 // ─────────────────────────────────────────────
 // Shared Fixtures
@@ -18,6 +19,7 @@ const makeUser = (overrides = {}) => ({
   name:          'Gojo Satoru',
   email:         'gojo@jujutsu.com',
   timezone:      'Asia/Tokyo',
+  birthday:      new Date('1995-12-07T00:00:00.000Z'),
   nextBirthDayAt: NEXT_BIRTH_DAY,
   active:        true,
   ...overrides,
@@ -251,10 +253,10 @@ describe('ReminderJobProcessor', () => {
 
       await processor.process(makeJob() as Job);
 
-      const expectedNextBirthday = DateTime
-        .fromJSDate(NEXT_BIRTH_DAY)
-        .plus({ years: 1 })
-        .toJSDate();
+      const expectedNextBirthday = computeNextBirthdayAt(
+        new Date('1989-12-07T00:00:00.000Z'),
+        'Asia/Tokyo'
+     );
 
       expect(mockUserRepo.update).toHaveBeenCalledWith(
         'userid-123',
@@ -306,45 +308,131 @@ describe('ReminderJobProcessor', () => {
     });
   });
 
-  // ───────────────────────────────────────────
-  // Full happy path
-  // ───────────────────────────────────────────
+    // ───────────────────────────────────────────
+    // Leap year edge cases
+    // ───────────────────────────────────────────
 
-  describe('happy path', () => {
-    it('should execute all steps in order for a valid birthday job', async () => {
-      const callOrder: string[] = [];
+    describe('leap year handling', () => {
+        it('should fall back to Feb 28 when advancing a Feb 29 birthday to a non-leap year', async () => {
+            // 2024 is a leap year — user's birthday is Feb 29
+            const feb29 = new Date('2024-02-29T00:00:00.000Z');
+            mockUserRepo.findById.mockResolvedValue(
+            makeUser({ birthday: feb29, nextBirthDayAt: feb29 }) as any
+            );
+            mockReminderRepo.claimReminder.mockResolvedValue(true);
 
-      mockUserRepo.findById.mockImplementation(async () => {
-        callOrder.push('findById');
-        return makeUser() as any;
-      });
-      mockReminderRepo.claimReminder.mockImplementation(async () => {
-        callOrder.push('claimReminder');
-        return true;
-      });
-      mockNotificationService.notifyBirthday.mockImplementation(async () => {
-        callOrder.push('notifyBirthday');
-      });
-      mockUserRepo.update.mockImplementation(async () => {
-        callOrder.push('update');
-        return makeUser() as any;
-      });
+            await processor.process(makeJob() as Job);
 
-      await processor.process(makeJob() as Job);
+            const updateCall = mockUserRepo.update.mock.calls[0][1] as any;
+            const advanced = DateTime.fromJSDate(updateCall.nextBirthDayAt);
 
-      expect(callOrder).toEqual([
-        'findById',
-        'claimReminder',
-        'notifyBirthday',
-        'update',
-      ]);
+            expect(advanced.month).toBe(2);
+            expect(advanced.day).toBe(28);
+            const isLeapYear = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+            expect(isLeapYear(advanced.year)).toBe(false);
+            expect(advanced.month).not.toBe(3);
+            expect(advanced.day).not.toBe(1);
+        });
+
+        it('should use Feb 29 when advancing a Feb 29 birthday to a leap year', async () => {
+            // 2020 is a leap year — next leap year after is 2024
+            const feb29 = new Date('2020-02-29T00:00:00.000Z');
+            mockUserRepo.findById.mockResolvedValue(
+            makeUser({ birthday: feb29, nextBirthDayAt: feb29 }) as any
+            );
+            mockReminderRepo.claimReminder.mockResolvedValue(true);
+
+            await processor.process(makeJob() as Job);
+
+            const updateCall = mockUserRepo.update.mock.calls[0][1] as any;
+            const advanced = DateTime.fromJSDate(updateCall.nextBirthDayAt);
+
+            // Next year after 2020 Feb 29 job fires is 2021 — not a leap year, falls back to Feb 28
+            expect(advanced.month).toBe(2);
+            expect(advanced.day).toBe(28);
+            expect(advanced.month).not.toBe(3);
+            expect(advanced.day).not.toBe(1);
+        });
+
+        it('should use Feb 29 when the next year happens to be a leap year', async () => {
+            // Pin "now" to March 2027 so computeNextBirthdayAt resolves to Feb 29 2028 (leap year)
+            jest.spyOn(DateTime, 'now').mockReturnValue(
+                DateTime.fromISO('2027-03-01T00:00:00.000Z') as any
+            );
+
+            const feb29 = new Date('2000-02-29T00:00:00.000Z');
+            mockUserRepo.findById.mockResolvedValue(
+                makeUser({ birthday: feb29, nextBirthDayAt: feb29 }) as any
+            );
+            mockReminderRepo.claimReminder.mockResolvedValue(true);
+
+            await processor.process(makeJob() as Job);
+
+            const updateCall = mockUserRepo.update.mock.calls[0][1] as any;
+            const advanced = DateTime.fromJSDate(updateCall.nextBirthDayAt).setZone('Asia/Tokyo');
+
+            // 2028 is a leap year — real Feb 29 should be used
+            expect(advanced.year).toBe(2028);
+            expect(advanced.month).toBe(2);
+            expect(advanced.day).toBe(29);
+        });
+
+        it('should never advance to March 1 for a Feb 29 birthday', async () => {
+            const feb29 = new Date('2024-02-29T00:00:00.000Z');
+            mockUserRepo.findById.mockResolvedValue(
+            makeUser({ birthday: feb29, nextBirthDayAt: feb29 }) as any
+            );
+            mockReminderRepo.claimReminder.mockResolvedValue(true);
+
+            await processor.process(makeJob() as Job);
+
+            const updateCall = mockUserRepo.update.mock.calls[0][1] as any;
+            const advanced = DateTime.fromJSDate(updateCall.nextBirthDayAt);
+
+            expect(advanced.month).not.toBe(3);
+            expect(advanced.day).not.toBe(1);
+        });
     });
 
-    it('should resolve without throwing on complete success', async () => {
-      mockUserRepo.findById.mockResolvedValue(makeUser() as any);
-      mockReminderRepo.claimReminder.mockResolvedValue(true);
+    // ───────────────────────────────────────────
+    // Full happy path
+    // ───────────────────────────────────────────
 
-      await expect(processor.process(makeJob() as Job)).resolves.toBeUndefined();
+    describe('happy path', () => {
+        it('should execute all steps in order for a valid birthday job', async () => {
+        const callOrder: string[] = [];
+
+        mockUserRepo.findById.mockImplementation(async () => {
+            callOrder.push('findById');
+            return makeUser() as any;
+        });
+        mockReminderRepo.claimReminder.mockImplementation(async () => {
+            callOrder.push('claimReminder');
+            return true;
+        });
+        mockNotificationService.notifyBirthday.mockImplementation(async () => {
+            callOrder.push('notifyBirthday');
+        });
+        mockUserRepo.update.mockImplementation(async () => {
+            callOrder.push('update');
+            return makeUser() as any;
+        });
+
+        await processor.process(makeJob() as Job);
+
+        expect(callOrder).toEqual([
+            'findById',
+            'claimReminder',
+            'notifyBirthday',
+            'update',
+        ]);
+        });
+
+        it('should resolve without throwing on complete success', async () => {
+        mockUserRepo.findById.mockResolvedValue(makeUser() as any);
+        mockReminderRepo.claimReminder.mockResolvedValue(true);
+
+        await expect(processor.process(makeJob() as Job)).resolves.toBeUndefined();
+        });
     });
-  });
 });

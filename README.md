@@ -269,7 +269,7 @@ The test suite is split into three layers, each run in isolation with `--runInBa
 Pure logic tests with no I/O. All dependencies are mocked.
 
 - `notification/service.test.ts` - fan-out and locale resolution
-- `notification/worker.test.ts` - processor steps: skip-if-deleted, idempotency, notify, advance date
+- `notification/worker.test.ts` - processor steps: skip-if-deleted, idempotency, notify, advance date, Leap year handling
 - `reminder/scheduler.test.ts` - window calculation, inactive user exclusion, delay guard
 - `user/controller.test.ts` - HTTP request/response mapping
 - `user/service.test.ts` - register, update, deactivate business rules

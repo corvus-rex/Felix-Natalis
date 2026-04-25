@@ -18,6 +18,7 @@ import { LogFileChannel } from '../../src/modules/notification/channel/logfile.j
 import { startInfra, stopInfra, TestInfra } from '../integration/setup/containers.js';
 import { startBirthdayScheduler } from '../../src/modules/reminder/scheduler.js';
 import { config } from '../../src/config/index.js';
+import { computeNextBirthdayAt } from '../../src/modules/reminder/birthdayUtils.js';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -482,7 +483,8 @@ describe('Birthday Reminder E2E', () => {
       const advanced  = DateTime.fromJSDate(userAfter!.nextBirthDayAt);
       const original  = DateTime.fromJSDate(originalNextBirthday);
 
-      expect(advanced.year).toBe(original.year + 1);
+      const expectedYear = computeNextBirthdayAt(original.toJSDate(), 'UTC').getFullYear();
+      expect(advanced.year).toBe(expectedYear);
       expect(advanced.month).toBe(original.month);
       expect(advanced.day).toBe(original.day);
       expect(advanced.hour).toBe(original.hour);

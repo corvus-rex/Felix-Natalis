@@ -12,7 +12,7 @@ export function computeNextBirthdayAt(
     : DateTime.fromISO(birthday as string).setZone(timezone);
 
   if (!birth.isValid) {
-    throw new Error('Invalid birthday date');
+    throw new Error('Invalid birthday date',);
   }
 
   const isLeapDay = birth.month === 2 && birth.day === 29;
