@@ -32,6 +32,7 @@ The system is designed around three independently deployable roles:
 - **Easy Race Condition Handling**: Only the scheduler with access to Redlock can add jobs to the queue. Since enqueueing is centralized in a single process guarded by a distributed lock, there's no risk of two processes racing to enqueue the same user simultaneously. Contrast this with direct enqueueing at registration time, where a user updating their birthday and the scheduler ticking at the same moment could both attempt to enqueue, requiring careful atomic remove-then-add logic with its own failure modes.
 - **Simple Mutation Handling**: With direct enqueueing, every mutation (birthday change, timezone change, deactivation, deletion) requires finding the existing delayed job, removing it atomically, and re-enqueueing with new parameters. If the remove succeeds but the re-enqueue fails, the user has no job and no safety net. With the sliding window, mutations only need to update the user document. The scheduler re-derives the correct queue state from MongoDB on the next tick automatically.
 - **Deployment Flexibility**: Changing `BIRTHDAY_HOUR` or any scheduling parameter takes effect on the next tick with no migration needed. With direct enqueueing, a queue full of jobs computed at the old parameters would require a bulk re-enqueue script to correct.
+- **Configurable Scheduling Frequency**: Number of job scheduling per day directly relates to tradeoff between compute load and data corectness/persistence. Scheduling frequency can be reduced to decrease compute load at the cost of data update immediacy (i.e when a user updates their birthday or timezone) and capability for system to recover from data loss. In realistic use case, a person would rarely update their birthday or timezone, so the immediacy cost is largely theoretical. A daily scheduler is practically indistinguishable from an hourly one from the user's perspective. As such, hourly scheduling might not be necessary and can be configured as needed to some other value in config (e.g once every 6 hours).
 ---
 
 ## 2. Architecture
@@ -368,10 +369,9 @@ docker compose up --build
 ```bash
 docker compose up --scale worker=3
 ```
-- Multiple worker instances are safe - BullMQ guarantees each job is consumed by exactly one worker.
+- Multiple worker instances are safe. BullMQ guarantees each job is consumed by exactly one worker.
 - API is fully stateless: no shared memory, no local state. Horizontal scaling is just `--scale api=N` behind a load balancer with no coordination needed.
 - Redlock on the scheduler means you can run multiple scheduler instances for redundancy without double-enqueueing.
-- 
 
 **Scaling the scheduler:**
 ```bash
