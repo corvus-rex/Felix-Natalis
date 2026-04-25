@@ -18,4 +18,5 @@ export const config = {
   },
   queueName:     process.env.QUEUE_NAME || 'reminder',
   birthdayHour:  parseInt(process.env.BIRTHDAY_HOUR || '9'),
+  schedulingFrequency: parseInt(process.env.SCHEDULING_FREQUENCY || '1'), // in hours
 };

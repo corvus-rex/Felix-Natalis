@@ -2,8 +2,9 @@
 import cron from 'node-cron';
 import { DateTime } from 'luxon';
 
-import { startBirthdayScheduler } from '../../../src/modules/reminder/scheduler.js';
+import { startBirthdayScheduler, toCronExpression } from '../../../src/modules/reminder/scheduler.js';
 import { logger } from '../../../src/infrastructure/logger.js';
+import { config } from '../../../src/config/index.js';
 
 jest.mock('node-cron', () => ({
   __esModule: true,
@@ -60,9 +61,9 @@ describe('startBirthdayScheduler', () => {
       userRepo as any,
       queue as any,
     );
-
+    const expectedExpression = toCronExpression(config.schedulingFrequency);
     expect(cron.schedule).toHaveBeenCalledWith(
-      '0 * * * *',
+      expectedExpression,
       expect.any(Function),
     );
   });

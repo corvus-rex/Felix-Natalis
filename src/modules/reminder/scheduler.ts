@@ -5,14 +5,29 @@ import type Redlock from 'redlock';
 import { IUserRepository } from '../user/repository.js';
 import { IReminderQueue } from './model.js';
 import { logger } from '../../infrastructure/logger.js';
+import { config } from '../../config/index.js';
+
+export const toCronExpression = (frequencyHours: number): string => {
+  switch (frequencyHours) {
+    case 1:  return '0 * * * *';       // every hour
+    case 2:  return '0 */2 * * *';     // every 2 hours
+    case 3:  return '0 */3 * * *';     // every 3 hours
+    case 6:  return '0 */6 * * *';     // every 6 hours
+    default:
+      logger.warn(`unsupported schedulingFrequency ${frequencyHours}h, falling back to hourly`);
+      return '0 * * * *';
+  }
+};
+
 
 export const startBirthdayScheduler = (
   redlock: Redlock,
   userRepo: IUserRepository,
   queue: IReminderQueue,
 ): void => {
-  // run every hour
-  cron.schedule('0 * * * *', async () => {
+    
+  const cronExpression = toCronExpression(config.schedulingFrequency);
+  cron.schedule(cronExpression, async () => {
     let lock;
 
     try {
