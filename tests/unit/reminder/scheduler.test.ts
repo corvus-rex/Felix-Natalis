@@ -1,226 +1,350 @@
-// startBirthdayScheduler.test.ts
-import cron from 'node-cron';
-import { DateTime } from 'luxon';
+import { toCronExpression, runSchedulerTick } from '../../../src/modules/reminder/scheduler.js';
+import { IUserRepository }  from '../../../src/modules/user/repository.js';
+import { IReminderQueue }   from '../../../src/modules/reminder/model.js';
+import { DateTime }         from 'luxon';
+import { User } from '../../../src/modules/user/model.js';
 
-import { startBirthdayScheduler, toCronExpression } from '../../../src/modules/reminder/scheduler.js';
-import { logger } from '../../../src/infrastructure/logger.js';
-import { config } from '../../../src/config/index.js';
+// ─────────────────────────────────────────────
+// Fixtures
+// ─────────────────────────────────────────────
 
-jest.mock('node-cron', () => ({
-  __esModule: true,
-  default: {
-    schedule: jest.fn(),
-  },
-}));
+const makeUser = (overrides: Partial<User> = {}): User => ({
+  id: 'userid-123',
+  name: 'Gojo Satoru',
+  email: 'gojo@test.com',
+  birthday: new Date('1989-12-07'),
+  timezone: 'Asia/Tokyo',
+  active: true,
+  nextBirthDayAt: new Date('2026-12-07T09:00:00.000Z'),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
 
-jest.mock('../../../src/infrastructure/logger.js', () => ({
-  logger: {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-  },
-}));
+const makeMockRedlock = (shouldFail = false) => ({
+  acquire: jest.fn().mockImplementation(() =>
+    shouldFail
+      ? Promise.reject(new Error('lock not available'))
+      : Promise.resolve({ unlock: jest.fn().mockResolvedValue(undefined) })
+  ),
+});
 
-describe('startBirthdayScheduler', () => {
-  let scheduledHandler: () => Promise<void>;
+// ─────────────────────────────────────────────
+// Test Suite
+// ─────────────────────────────────────────────
 
-  const lock = {
-    unlock: jest.fn(),
-  };
-
-  const redlock = {
-    acquire: jest.fn(),
-  };
-
-  const userRepo = {
-    findUsersWithBirthdayBetween: jest.fn(),
-  };
-
-  const queue = {
-    add: jest.fn(),
-  };
+describe('scheduler', () => {
+  let mockUserRepo: jest.Mocked<IUserRepository>;
+  let mockQueue:    jest.Mocked<IReminderQueue>;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockUserRepo = {
+      create:                      jest.fn(),
+      findById:                    jest.fn(),
+      findByEmail:                 jest.fn(),
+      findUsersWithBirthdayBetween: jest.fn(),
+      update:                      jest.fn(),
+      delete:                      jest.fn(),
+    };
 
-    (cron.schedule as jest.Mock).mockImplementation(
-      (_expression: string, handler: () => Promise<void>) => {
-        scheduledHandler = handler;
-      },
-    );
-
-    redlock.acquire.mockResolvedValue(lock);
-    lock.unlock.mockResolvedValue(undefined);
-    userRepo.findUsersWithBirthdayBetween.mockResolvedValue([]);
-    queue.add.mockResolvedValue(undefined);
+    mockQueue = {
+      add:                    jest.fn().mockResolvedValue(undefined),
+      addBulk:                jest.fn().mockResolvedValue(undefined),
+      removeById:             jest.fn().mockResolvedValue(undefined),
+      removeBirthdayReminder: jest.fn().mockResolvedValue(undefined),
+    };
   });
 
-  it('registers hourly cron schedule', () => {
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
-    const expectedExpression = toCronExpression(config.schedulingFrequency);
-    expect(cron.schedule).toHaveBeenCalledWith(
-      expectedExpression,
-      expect.any(Function),
-    );
+  afterEach(() => jest.clearAllMocks());
+
+  // ───────────────────────────────────────────
+  // toCronExpression()
+  // ───────────────────────────────────────────
+
+  describe('toCronExpression()', () => {
+    it.each([
+      [1,  '0 * * * *'],
+      [2,  '0 */2 * * *'],
+      [3,  '0 */3 * * *'],
+      [6,  '0 */6 * * *'],
+    ])('should return %s for frequency %ih', (freq, expected) => {
+      expect(toCronExpression(freq)).toBe(expected);
+    });
+
+    it('should fall back to hourly for unsupported frequency', () => {
+      expect(toCronExpression(5)).toBe('0 * * * *');
+      expect(toCronExpression(7)).toBe('0 * * * *');
+      expect(toCronExpression(0)).toBe('0 * * * *');
+    });
   });
 
-  it('acquires lock before processing', async () => {
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
+  // ───────────────────────────────────────────
+  // runSchedulerTick() — lock
+  // ───────────────────────────────────────────
 
-    await scheduledHandler();
+  describe('runSchedulerTick() — lock', () => {
+    it('should acquire lock with correct key and ttl', async () => {
+      const redlock = makeMockRedlock();
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValue([]);
 
-    expect(redlock.acquire).toHaveBeenCalledWith(
-      ['locks:cron:birthday'],
-      60_000,
-    );
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      expect(redlock.acquire).toHaveBeenCalledWith(
+        ['locks:cron:birthday'],
+        120_000
+      );
+    });
+
+    it('should release lock after successful run', async () => {
+      const lock    = { unlock: jest.fn().mockResolvedValue(undefined) };
+      const redlock = { acquire: jest.fn().mockResolvedValue(lock) };
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValue([]);
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      expect(lock.unlock).toHaveBeenCalledTimes(1);
+    });
+
+    it('should release lock even if processing throws', async () => {
+      const lock    = { unlock: jest.fn().mockResolvedValue(undefined) };
+      const redlock = { acquire: jest.fn().mockResolvedValue(lock) };
+      mockUserRepo.findUsersWithBirthdayBetween.mockRejectedValue(
+        new Error('DB down')
+      );
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      expect(lock.unlock).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not enqueue any jobs if lock cannot be acquired', async () => {
+      const redlock = makeMockRedlock(true); // fails to acquire
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      expect(mockUserRepo.findUsersWithBirthdayBetween).not.toHaveBeenCalled();
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it('should handle unlock failure gracefully without throwing', async () => {
+      const lock    = { unlock: jest.fn().mockRejectedValue(new Error('unlock failed')) };
+      const redlock = { acquire: jest.fn().mockResolvedValue(lock) };
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValue([]);
+
+      // Should not throw even if unlock fails
+      await expect(
+        runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000)
+      ).resolves.toBeUndefined();
+    });
   });
 
-  it('queries repository for birthdays in next 8 hours', async () => {
-    const now = DateTime.utc();
+  // ───────────────────────────────────────────
+  // runSchedulerTick() — job building
+  // ───────────────────────────────────────────
 
-    jest.spyOn(DateTime, 'utc').mockReturnValue(now);
+  describe('runSchedulerTick() — job building', () => {
+    it('should enqueue a job for a user within the window', async () => {
+      const redlock = makeMockRedlock();
+      const user    = makeUser();
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValueOnce([user])
+                                               .mockResolvedValueOnce([]);
 
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
 
-    await scheduledHandler();
+      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
+      const jobs = mockQueue.addBulk.mock.calls[0][0];
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].data.userId).toBe('userid-123');
+      expect(jobs[0].data.type).toBe('birthday');
+      expect(jobs[0].delay).toBeGreaterThan(0);
+    });
 
-    expect(
-      userRepo.findUsersWithBirthdayBetween,
-    ).toHaveBeenCalledWith(
-      now.toJSDate(),
-      now.plus({ hours: 8 }).toJSDate(),
-    );
+    it('should set scheduledAt as normalized ISO string', async () => {
+      const redlock = makeMockRedlock();
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValueOnce([makeUser()])
+                                               .mockResolvedValueOnce([]);
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      const jobs = mockQueue.addBulk.mock.calls[0][0];
+      expect(() => new Date(jobs[0].data.scheduledAt)).not.toThrow();
+      expect(jobs[0].data.scheduledAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    });
+
+    it('should skip users with delay <= 0 (birthday already passed)', async () => {
+      const redlock  = makeMockRedlock();
+      const pastUser = makeUser({
+        nextBirthDayAt: DateTime.utc().minus({ hours: 1 }).toJSDate() // in the past
+      });
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValueOnce([pastUser])
+                                               .mockResolvedValueOnce([]);
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it('should skip users with invalid nextBirthDayAt', async () => {
+      const redlock     = makeMockRedlock();
+      const invalidUser = makeUser({
+        nextBirthDayAt: new Date('invalid-date')
+      });
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValueOnce([invalidUser])
+                                               .mockResolvedValueOnce([]);
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it('should not call addBulk if all users in batch are skipped', async () => {
+      const redlock = makeMockRedlock();
+      const pastUser = makeUser({
+        nextBirthDayAt: DateTime.utc().minus({ minutes: 1 }).toJSDate()
+      });
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValueOnce([pastUser])
+                                               .mockResolvedValueOnce([]);
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it('should enqueue multiple users in a single addBulk call', async () => {
+      const redlock = makeMockRedlock();
+      const users   = [
+        makeUser({ id: 'user-1', nextBirthDayAt: DateTime.utc().plus({ hours: 2 }).toJSDate() }),
+        makeUser({ id: 'user-2', nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate() }),
+        makeUser({ id: 'user-3', nextBirthDayAt: DateTime.utc().plus({ hours: 6 }).toJSDate() }),
+      ];
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValueOnce(users)
+                                               .mockResolvedValueOnce([]);
+
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
+
+      const jobs = mockQueue.addBulk.mock.calls[0][0];
+      expect(jobs).toHaveLength(3);
+      expect(jobs.map((j: any) => j.data.userId)).toEqual(['user-1', 'user-2', 'user-3']);
+    });
   });
 
-  it('queues users with future birthdays', async () => {
-    const now = DateTime.utc();
+  // ───────────────────────────────────────────
+  // runSchedulerTick() — pagination
+  // ───────────────────────────────────────────
 
-    jest.spyOn(DateTime, 'utc').mockReturnValue(now);
+  describe('runSchedulerTick() — pagination', () => {
+    it('should stop pagination when batch returns empty', async () => {
+      const redlock = makeMockRedlock();
+      mockUserRepo.findUsersWithBirthdayBetween.mockResolvedValue([]);
 
-    const nextBirthday = now.plus({ hours: 2 }).toJSDate();
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
 
-    userRepo.findUsersWithBirthdayBetween.mockResolvedValue([
-      {
-        id: 'user-1',
-        nextBirthDayAt: nextBirthday,
-      },
-    ]);
+      expect(mockUserRepo.findUsersWithBirthdayBetween).toHaveBeenCalledTimes(1);
+    });
 
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
+    it('should continue paginating while batch size equals queryBatchSize', async () => {
+      const redlock = makeMockRedlock();
 
-    await scheduledHandler();
+      // First batch — full page, triggers next fetch
+      const batch1 = Array.from({ length: 10 }, (_, i) =>
+        makeUser({
+          id:            `user-batch1-${i}`,
+          nextBirthDayAt: DateTime.utc().plus({ hours: i + 1 }).toJSDate(),
+        })
+      );
 
-    expect(queue.add).toHaveBeenCalledWith(
-      {
-        userId: 'user-1',
-        type: 'birthday',
-        scheduledAt: DateTime.fromJSDate(nextBirthday)
-          .toUTC()
-          .toISO(),
-      },
-      expect.any(Number),
-    );
-  });
+      // Second batch — partial page, stops pagination
+      const batch2 = [
+        makeUser({
+          id:            'user-batch2-0',
+          nextBirthDayAt: DateTime.utc().plus({ hours: 5 }).toJSDate(),
+        })
+      ];
 
-  it('does not queue users when delay is zero or negative', async () => {
-    const now = DateTime.utc();
+      mockUserRepo.findUsersWithBirthdayBetween
+        .mockResolvedValueOnce(batch1)
+        .mockResolvedValueOnce(batch2)
+        .mockResolvedValueOnce([]);
 
-    jest.spyOn(DateTime, 'utc').mockReturnValue(now);
+      // Mock queryBatchSize to 10
+      jest.replaceProperty(
+        (await import('../../../src/config/index.js')).config,
+        'queryBatchSize',
+        10
+      );
 
-    userRepo.findUsersWithBirthdayBetween.mockResolvedValue([
-      {
-        id: 'user-1',
-        nextBirthDayAt: now.minus({ minutes: 1 }).toJSDate(),
-      },
-    ]);
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
 
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
+      expect(mockUserRepo.findUsersWithBirthdayBetween).toHaveBeenCalledTimes(2);
+    });
 
-    await scheduledHandler();
+    it('should pass cursor from last item of previous batch', async () => {
+      const redlock = makeMockRedlock();
 
-    expect(queue.add).not.toHaveBeenCalled();
-  });
+      const batch1 = Array.from({ length: 10 }, (_, i) =>
+        makeUser({
+          id:            `user-${i}`,
+          nextBirthDayAt: DateTime.utc().plus({ hours: i + 1 }).toJSDate(),
+        })
+      );
 
-  it('logs warning when lock acquisition fails', async () => {
-    redlock.acquire.mockRejectedValue(new Error('locked'));
+      mockUserRepo.findUsersWithBirthdayBetween
+        .mockResolvedValueOnce(batch1)
+        .mockResolvedValueOnce([]);
 
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
+      jest.replaceProperty(
+        (await import('../../../src/config/index.js')).config,
+        'queryBatchSize',
+        10
+      );
 
-    await scheduledHandler();
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
 
-    expect(logger.warn).toHaveBeenCalledWith(
-      'scheduler failed or lock not acquired',
-      { err: expect.any(Error) },
-    );
-  });
+      // Second call should receive the last user's id as cursor
+      expect(mockUserRepo.findUsersWithBirthdayBetween).toHaveBeenNthCalledWith(
+        2,
+        expect.any(Date),
+        expect.any(Date),
+        'user-9'  // last item of batch1
+      );
+    });
 
-  it('releases lock after successful run', async () => {
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
+    it('should accumulate total enqueued across all pages', async () => {
+      const redlock = makeMockRedlock();
 
-    await scheduledHandler();
+      const batch1 = Array.from({ length: 10 }, (_, i) =>
+        makeUser({
+          id:            `user-b1-${i}`,
+          nextBirthDayAt: DateTime.utc().plus({ hours: i + 1 }).toJSDate(),
+        })
+      );
 
-    expect(lock.unlock).toHaveBeenCalledTimes(1);
-  });
+      const batch2 = Array.from({ length: 5 }, (_, i) =>
+        makeUser({
+          id:            `user-b2-${i}`,
+          nextBirthDayAt: DateTime.utc().plus({ hours: i + 1 }).toJSDate(),
+        })
+      );
 
-  it('logs error when unlock fails', async () => {
-    lock.unlock.mockRejectedValue(new Error('unlock failed'));
+      mockUserRepo.findUsersWithBirthdayBetween
+        .mockResolvedValueOnce(batch1)
+        .mockResolvedValueOnce(batch2)
+        .mockResolvedValueOnce([]);
 
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
+      jest.replaceProperty(
+        (await import('../../../src/config/index.js')).config,
+        'queryBatchSize',
+        10
+      );
 
-    await scheduledHandler();
+      await runSchedulerTick(redlock as any, mockUserRepo, mockQueue, 120_000);
 
-    expect(logger.error).toHaveBeenCalledWith(
-      'failed to release lock',
-      { err: expect.any(Error) },
-    );
-  });
-
-  it('logs completion after processing users', async () => {
-    userRepo.findUsersWithBirthdayBetween.mockResolvedValue([]);
-
-    startBirthdayScheduler(
-      redlock as any,
-      userRepo as any,
-      queue as any,
-    );
-
-    await scheduledHandler();
-
-    expect(logger.info).toHaveBeenCalledWith(
-      'birthday scheduler complete',
-      { count: 0 },
-    );
+      // addBulk called twice — once per batch
+      expect(mockQueue.addBulk).toHaveBeenCalledTimes(2);
+      const totalJobs =
+        mockQueue.addBulk.mock.calls[0][0].length +
+        mockQueue.addBulk.mock.calls[1][0].length;
+      expect(totalJobs).toBe(15);
+    });
   });
 });
