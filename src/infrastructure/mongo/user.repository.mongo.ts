@@ -58,11 +58,6 @@ export class UserRepositoryMongo implements IUserRepository {
     return doc ? toUser(doc) : null;
   }
 
-  async findActive(): Promise<User[]> {
-    const docs = await UserModel.find({ active: true }).lean();
-    return docs.map(toUser);
-  }
-
   async update(id: string, fields: UpdateUserDTO): Promise<User | null> {
     const doc = await UserModel.findByIdAndUpdate(
       id,

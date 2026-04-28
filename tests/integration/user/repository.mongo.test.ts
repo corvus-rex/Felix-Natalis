@@ -76,52 +76,6 @@ describe('UserRepository (integration)', () => {
     });
   });
 
-  describe('findActive()', () => {
-    it('should return empty array when database has no users', async () => {
-      const users = await repo.findActive();
-
-      expect(users).toEqual([]);
-    });
-
-    it('should only return active users', async () => {
-      const activeUser = await repo.create({
-        ...payload,
-        email: 'active@test.com',
-      });
-
-      const inactiveUser = await repo.create({
-        ...payload,
-        email: 'inactive@test.com',
-      });
-
-      await repo.update(inactiveUser.id, { active: false });
-
-      const active = await repo.findActive();
-
-      expect(active).toHaveLength(1);
-      expect(active[0].email).toBe(activeUser.email);
-    });
-
-    it('should return multiple active users', async () => {
-      await repo.create({
-        ...payload,
-        email: 'first@test.com',
-      });
-
-      await repo.create({
-        ...payload,
-        email: 'second@test.com',
-      });
-
-      const active = await repo.findActive();
-
-      expect(active).toHaveLength(2);
-      expect(active.map((u) => u.email)).toEqual(
-        expect.arrayContaining(['first@test.com', 'second@test.com'])
-      );
-    });
-  });
-
   describe('update()', () => {
     it('should update and return the updated document', async () => {
       const created = await repo.create(payload);
