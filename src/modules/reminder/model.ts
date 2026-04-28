@@ -10,6 +10,7 @@ export interface ReminderJobData {
 
 export interface IReminderQueue {
   add(data: ReminderJobData, delay: number): Promise<void>;
+  addBulk(jobs: Array<{ data: ReminderJobData; delay: number }>): Promise<void>;
   removeById(jobId: string): Promise<void>;
   removeBirthdayReminder(userId: string, scheduledAt: string): Promise<void>;
 }
@@ -29,25 +30,36 @@ export class ReminderQueue implements IReminderQueue {
     return `${data.type}_${data.userId}_${safeTimestamp}`;
   }
 
+  private normalizeJobData(data: ReminderJobData): ReminderJobData {
+    return { ...data, scheduledAt: new Date(data.scheduledAt).toISOString() };
+  }
+
   async add(data: ReminderJobData, delay: number): Promise<void> {
-    const scheduledAt = new Date(data.scheduledAt).toISOString();
-
-    const normalizedData: ReminderJobData = {
-      ...data,
-      scheduledAt,
-    };
-
-    const jobId = this.buildJobId(normalizedData);
-
+    const normalizedData = this.normalizeJobData(data);
     await this.queue.add('send-reminder', normalizedData, {
       delay,
-      jobId,
-
-      // keep job for a while to preserve dedup
-      removeOnComplete: {
-        age: 3600, // 1 hour
-      },
+      jobId: this.buildJobId(normalizedData),
+      removeOnComplete: { age: 3600 },
     });
+  }
+
+  async addBulk(jobs: Array<{ data: ReminderJobData; delay: number }>): Promise<void> {
+    if (jobs.length === 0) return;
+
+    const bulkJobs = jobs.map(({ data, delay }) => {
+      const normalizedData = this.normalizeJobData(data);
+      return {
+        name: 'send-reminder',
+        data: normalizedData,
+        opts: {
+          delay,
+          jobId: this.buildJobId(normalizedData),
+          removeOnComplete: { age: 3600 },
+        },
+      };
+    });
+
+    await this.queue.addBulk(bulkJobs);
   }
 
   async removeById(jobId: string): Promise<void> {

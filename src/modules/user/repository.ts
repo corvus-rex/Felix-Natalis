@@ -6,5 +6,5 @@ export interface IUserRepository {
   findByEmail(email: string): Promise<User | null>;
   update(id: string, fields: UpdateUserDTO): Promise<User | null>;
   delete(id: string): Promise<void>;
-  findUsersWithBirthdayBetween(from: Date, to: Date): Promise<User[]>;
+  findUsersWithBirthdayBetween(from: Date, to: Date, cursor?: string): Promise<User[]>;
 }
