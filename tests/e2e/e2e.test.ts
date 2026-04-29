@@ -16,9 +16,11 @@ import { ReminderJobProcessor } from '../../src/modules/notification/worker.js';
 import { NotificationService } from '../../src/modules/notification/service.js';
 import { LogFileChannel } from '../../src/modules/notification/channel/logfile.js';
 import { startInfra, stopInfra, TestInfra } from '../integration/setup/containers.js';
-import { startBirthdayScheduler } from '../../src/modules/reminder/scheduler.js';
+import { runSchedulerTick } from '../../src/modules/reminder/scheduler.js';
 import { config } from '../../src/config/index.js';
 import { computeNextBirthdayAt } from '../../src/modules/reminder/birthdayUtils.js';
+import { createRedlock } from '../../src/infrastructure/redlock.js';
+import { logger } from '../../src/infrastructure/logger.js';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -62,37 +64,21 @@ const readLogFile = async (logDir: string): Promise<string> => {
 const countLogEntries = (log: string): number =>
   (log.match(/🎉 Happy Birthday!/g) ?? []).length;
 
-/**
- * Runs one scheduler tick directly — bypasses cron timing and Redlock.
- * Mirrors exactly what startBirthdayScheduler does inside its cron callback.
- */
-const runSchedulerTick = async (
-  userRepo: UserRepositoryMongo,
-  queue: ReminderQueue,
-): Promise<void> => {
-  const now        = DateTime.utc();
-  const next8Hours = now.plus({ hours: 8 });
+// ─────────────────────────────────────────────
+// Time anchor
+// ─────────────────────────────────────────────
 
-  const users = await userRepo.findUsersWithBirthdayBetween(
-    now.toJSDate(),
-    next8Hours.toJSDate(),
-  );
+const BIRTHDAY_FIRE_UTC = DateTime.fromObject(
+  { year: 2026, month: 12, day: 7, hour: config.birthdayHour, minute: 0, second: 0 },
+  { zone: 'Asia/Tokyo' }
+).toUTC();
 
-  for (const user of users) {
-    const scheduledAt = DateTime.fromJSDate(user.nextBirthDayAt).toUTC().toISO();
-    if (!scheduledAt) continue;
+const FIXED_NOW = BIRTHDAY_FIRE_UTC.minus({ hours: 4 });
 
-    const delay = DateTime
-      .fromJSDate(user.nextBirthDayAt)
-      .toUTC()
-      .diff(now, 'milliseconds')
-      .milliseconds;
-
-    if (delay <= 0) continue;
-
-    await queue.add({ userId: user.id, type: 'birthday', scheduledAt }, delay);
-  }
-};
+// Always relative to FIXED_NOW, never to real time
+const inWindow    = (hours: number) => FIXED_NOW.plus({ hours }).toJSDate();
+const outOfWindow = (hours: number) => FIXED_NOW.plus({ hours: 8 + hours }).toJSDate();
+const inPast      = (minutes: number) => FIXED_NOW.minus({ minutes }).toJSDate();
 
 // ─────────────────────────────────────────────
 // Fixtures
@@ -120,6 +106,8 @@ describe('Birthday Reminder E2E', () => {
   let logDir:         string;
   let logFileChannel: LogFileChannel;
   let queueEvents:    QueueEvents;
+  let redlock:        ReturnType<typeof createRedlock>;
+  const lockTtlMs =   120_000;
 
   beforeAll(async () => {
     infra = await startInfra();
@@ -145,9 +133,12 @@ describe('Birthday Reminder E2E', () => {
       (job) => processor.process(job),
       { connection: infra.redisClient, concurrency: 1 },
     );
+
     queueEvents = new QueueEvents(config.queueName, {
       connection: infra.redisClient,
     });
+
+    redlock = createRedlock(infra.redisClient);
 
     const userService    = new UserService(userRepo, reminderQueue);
     const userController = new UserController(userService);
@@ -164,6 +155,7 @@ describe('Birthday Reminder E2E', () => {
   });
 
   afterEach(async () => {
+    await infra.redisClient.del('locks:cron:birthday');
     await mongoose.connection.collection('users').deleteMany({});
     await mongoose.connection.collection('reminderlogs').deleteMany({});
     await rawQueue.obliterate({ force: true });
@@ -230,7 +222,6 @@ describe('Birthday Reminder E2E', () => {
     });
 
     it('should enqueue job when scheduler tick runs for registered user within window', async () => {
-      // Register via HTTP so the full registration flow is exercised
       const res = await supertest(app)
         .post('/api/v1/users/register')
         .send(validPayload);
@@ -238,24 +229,10 @@ describe('Birthday Reminder E2E', () => {
       expect(res.status).toBe(201);
       const userId = res.body.id;
 
-      // The registration sets nextBirthDayAt to the real next birthday (months away).
-      // Force it into the scheduler's 8-hour window so the tick picks it up.
-      await mongoose.connection.collection('users').updateOne(
-        { _id: new mongoose.Types.ObjectId(userId) },
-        { $set: { nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate() } },
-      );
-      const debugUser = await mongoose.connection.collection('users').findOne(
-        { _id: new mongoose.Types.ObjectId(userId) }
-      );
-      const now = DateTime.utc();
-      const next8Hours = now.plus({ hours: 8 });
-      const usersInWindow = await userRepo.findUsersWithBirthdayBetween(
-        now.toJSDate(),
-        next8Hours.toJSDate(),
-      );
-      await runSchedulerTick(userRepo, reminderQueue); 
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const delayed = await rawQueue.getDelayed();
+      console.log('Delayed jobs after registration and scheduler tick:', delayed);
       expect(delayed).toHaveLength(1);
       expect(delayed[0].data.userId).toBe(userId);
     });
@@ -267,7 +244,6 @@ describe('Birthday Reminder E2E', () => {
       expect(res.status).toBe(409);
       expect(res.body.error).toMatch(/email/i);
 
-      // Only one user persisted despite two attempts
       const users = await mongoose.connection.collection('users').find({}).toArray();
       expect(users).toHaveLength(1);
     });
@@ -279,18 +255,16 @@ describe('Birthday Reminder E2E', () => {
 
   describe('deactivation -> queue cleanup', () => {
     it('should deactivate user, mark inactive in DB, and remove queued job', async () => {
-      // Seed user inside window so scheduler enqueues a job
-      const inWindow = DateTime.utc().plus({ hours: 4 }).toJSDate();
-      const created  = await userRepo.create({
+      const created = await userRepo.create({
         name:           validPayload.name,
         email:          validPayload.email,
         birthday:       new Date('1989-12-07'),
         timezone:       validPayload.timezone,
-        nextBirthDayAt: inWindow,
+        nextBirthDayAt: inWindow(4),
         active:         true,
       });
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const before = await rawQueue.getDelayed();
       expect(before).toHaveLength(1);
@@ -320,13 +294,7 @@ describe('Birthday Reminder E2E', () => {
 
       const userId = created.body.id;
 
-      // Move into window and enqueue via scheduler
-      await mongoose.connection.collection('users').updateOne(
-        { _id: new mongoose.Types.ObjectId(userId) },
-        { $set: { nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate() } },
-      );
-
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const before = await rawQueue.getDelayed();
       expect(before).toHaveLength(1);
@@ -338,11 +306,9 @@ describe('Birthday Reminder E2E', () => {
 
       expect(res.status).toBe(200);
 
-      // Old job removed — scheduler hasn't run again yet so queue is empty
       const after = await rawQueue.getDelayed();
       expect(after).toHaveLength(0);
 
-      // DB reflects updated timezone and recomputed nextBirthDayAt
       const updatedUser = await userRepo.findById(userId);
       expect(updatedUser?.timezone).toBe('America/New_York');
 
@@ -351,7 +317,6 @@ describe('Birthday Reminder E2E', () => {
         .setZone('America/New_York');
       expect(newBirthday.hour).toBe(config.birthdayHour);
 
-      // Recomputed nextBirthDayAt differs from the old scheduledAt
       expect(updatedUser!.nextBirthDayAt.toISOString()).not.toBe(oldScheduled);
     });
   });
@@ -362,31 +327,33 @@ describe('Birthday Reminder E2E', () => {
 
   describe('scheduler tick -> queue', () => {
     it('should enqueue jobs for users whose birthday falls within the next 8 hours', async () => {
-      // Inside window: 4 hours from now
       await userRepo.create({
         name:           'In Window',
         email:          'in@window.com',
         birthday:       new Date('1990-01-01'),
         timezone:       'UTC',
-        nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate(),
+        nextBirthDayAt: inWindow(4), 
         active:         true,
       });
 
-      // Outside window: 12 hours from now
       await userRepo.create({
         name:           'Out Of Window',
         email:          'out@window.com',
         birthday:       new Date('1990-06-15'),
         timezone:       'UTC',
-        nextBirthDayAt: DateTime.utc().plus({ hours: 12 }).toJSDate(),
+        nextBirthDayAt: outOfWindow(4), 
         active:         true,
       });
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const delayed = await rawQueue.getDelayed();
       expect(delayed).toHaveLength(1);
       expect(delayed[0].data.userId).toBeDefined();
+
+      await userRepo.findById(delayed[0].data.userId).then(user => {
+        expect(user?.email).toBe('in@window.com');
+      });
     });
 
     it('should not enqueue inactive users', async () => {
@@ -395,11 +362,11 @@ describe('Birthday Reminder E2E', () => {
         email:          'inactive@test.com',
         birthday:       new Date('1990-01-01'),
         timezone:       'UTC',
-        nextBirthDayAt: DateTime.utc().plus({ hours: 2 }).toJSDate(),
+        nextBirthDayAt: inWindow(2),   // inside window but inactive
         active:         false,
       });
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const delayed = await rawQueue.getDelayed();
       expect(delayed).toHaveLength(0);
@@ -411,12 +378,11 @@ describe('Birthday Reminder E2E', () => {
         email:          'past@test.com',
         birthday:       new Date('1990-01-01'),
         timezone:       'UTC',
-        // delay <= 0 — already passed
-        nextBirthDayAt: DateTime.utc().minus({ minutes: 1 }).toJSDate(),
+        nextBirthDayAt: inPast(1),   // 1 minute before FIXED_NOW
         active:         true,
       });
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const delayed = await rawQueue.getDelayed();
       expect(delayed).toHaveLength(0);
@@ -428,14 +394,12 @@ describe('Birthday Reminder E2E', () => {
         email:          'in@window.com',
         birthday:       new Date('1990-01-01'),
         timezone:       'UTC',
-        nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate(),
+        nextBirthDayAt: inWindow(4),   // same fixed time both ticks
         active:         true,
       });
 
-      // Two consecutive ticks — queue.add should be idempotent or ReminderQueue
-      // deduplicates by jobId; assert only one job exists after both ticks
-      await runSchedulerTick(userRepo, reminderQueue);
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const delayed = await rawQueue.getDelayed();
       expect(delayed).toHaveLength(1);
@@ -447,6 +411,7 @@ describe('Birthday Reminder E2E', () => {
   // ─────────────────────────────────────────────
 
   describe('worker -> logfile notification -> DB update', () => {
+
     it('should process job, write to log file, and advance nextBirthDayAt', async () => {
       const registerRes = await supertest(app)
         .post('/api/v1/users/register')
@@ -455,41 +420,43 @@ describe('Birthday Reminder E2E', () => {
       expect(registerRes.status).toBe(201);
       const userId = registerRes.body.id;
 
-      // Move nextBirthDayAt inside the scheduler window and run a tick
-      await mongoose.connection.collection('users').updateOne(
-        { _id: new mongoose.Types.ObjectId(userId) },
-        { $set: { nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate() } },
-      );
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      const delayed = await rawQueue.getDelayed();
+      expect(delayed).toHaveLength(1);
 
-      const userBefore           = await userRepo.findById(userId);
-      const originalNextBirthday = userBefore!.nextBirthDayAt;
-
-      const delayed    = await rawQueue.getDelayed();
       const jobId      = delayed[0].id!;
       const workerDone = waitForJob(worker, jobId);
+
+      const originalNow = Date.now();
+
+      Date.now = () => BIRTHDAY_FIRE_UTC.plus({ minutes: 1 }).toMillis();
+
       await delayed[0].changeDelay(0);
       await workerDone;
 
-      // 1. Log file written with correct recipient
+      Date.now = () => originalNow;
+
+      // 1. Log file written
       const log = await readLogFile(logDir);
       expect(countLogEntries(log)).toBe(1);
       expect(log).toContain('Gojo Satoru');
       expect(log).toContain('gojo@jujutsu.com');
 
-      // 2. nextBirthDayAt advanced by exactly one year
+      // 2. nextBirthDayAt advanced to 2027 — verified against BIRTHDAY_FIRE_UTC, not DateTime.now()
       const userAfter = await userRepo.findById(userId);
-      const advanced  = DateTime.fromJSDate(userAfter!.nextBirthDayAt);
-      const original  = DateTime.fromJSDate(originalNextBirthday);
+      const advanced  = DateTime.fromJSDate(userAfter!.nextBirthDayAt).setZone(userAfter!.timezone);
 
-      const expectedYear = computeNextBirthdayAt(original.toJSDate(), 'UTC').getFullYear();
-      expect(advanced.year).toBe(expectedYear);
-      expect(advanced.month).toBe(original.month);
-      expect(advanced.day).toBe(original.day);
-      expect(advanced.hour).toBe(original.hour);
+      logger.warn('Advanced nextBirthDayAt', {
+        advanced: advanced.toISO(),
+        expected: BIRTHDAY_FIRE_UTC.plus({ years: 1 }).setZone(validPayload.timezone).toISO(),
+      });
+      expect(advanced.year).toBe(BIRTHDAY_FIRE_UTC.year + 1);  // 2027
+      expect(advanced.month).toBe(BIRTHDAY_FIRE_UTC.setZone(validPayload.timezone).month);
+      expect(advanced.day).toBe(BIRTHDAY_FIRE_UTC.setZone(validPayload.timezone).day);
+      expect(advanced.hour).toBe(config.birthdayHour);
 
-      // 3. Idempotency log created in DB
+      // 3. Idempotency log created
       const logs = await mongoose.connection
         .collection('reminderlogs')
         .find({})
@@ -497,22 +464,19 @@ describe('Birthday Reminder E2E', () => {
       expect(logs).toHaveLength(1);
       expect(logs[0].userId.toString()).toBe(userId);
     });
-
     it('should not write to log file if user was deleted before job processed', async () => {
-      // Seed user inside window
       const created = await userRepo.create({
         name:           validPayload.name,
         email:          validPayload.email,
         birthday:       new Date('1989-12-07'),
         timezone:       validPayload.timezone,
-        nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate(),
+        nextBirthDayAt: inWindow(4),   // FIXED_NOW relative
         active:         true,
       });
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
       const delayed = await rawQueue.getDelayed();
 
-      // Delete user before job fires
       await supertest(app).delete(`/api/v1/users/${created.id}`);
 
       const processor = new ReminderJobProcessor(
@@ -531,24 +495,22 @@ describe('Birthday Reminder E2E', () => {
     });
 
     it('should not write duplicate log entries on retry after idempotency claim', async () => {
-      // Seed user inside window
       const created = await userRepo.create({
         name:           validPayload.name,
         email:          validPayload.email,
         birthday:       new Date('1989-12-07'),
         timezone:       validPayload.timezone,
-        nextBirthDayAt: DateTime.utc().plus({ hours: 4 }).toJSDate(),
+        nextBirthDayAt: inWindow(4),   // FIXED_NOW relative
         active:         true,
       });
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
       const delayed    = await rawQueue.getDelayed();
       const jobId      = delayed[0].id!;
       const workerDone = waitForJob(worker, jobId);
       await delayed[0].changeDelay(0);
       await workerDone;
 
-      // Simulate retry with same job data
       const processor = new ReminderJobProcessor(
         userRepo,
         reminderRepo,
@@ -565,39 +527,69 @@ describe('Birthday Reminder E2E', () => {
     });
 
     it('should write separate log entries for different users', async () => {
-      // Seed both users inside window
-      await userRepo.create({
+      const gojo = await userRepo.create({
         name:           'Gojo Satoru',
         email:          'gojo@jujutsu.com',
         birthday:       new Date('1989-12-07'),
         timezone:       'Asia/Tokyo',
-        nextBirthDayAt: DateTime.utc().plus({ hours: 3 }).toJSDate(),
+        nextBirthDayAt: inWindow(3),
         active:         true,
       });
-      await userRepo.create({
+      const nanami = await userRepo.create({
         name:           'Nanami Kento',
         email:          'nanami@jujutsu.com',
         birthday:       new Date('1988-07-03'),
         timezone:       'Asia/Tokyo',
-        nextBirthDayAt: DateTime.utc().plus({ hours: 5 }).toJSDate(),
+        nextBirthDayAt: inWindow(5),
         active:         true,
       });
 
-      await runSchedulerTick(userRepo, reminderQueue);
+      await runSchedulerTick(redlock, userRepo, reminderQueue, lockTtlMs, FIXED_NOW);
 
       const delayed = await rawQueue.getDelayed();
       expect(delayed).toHaveLength(2);
 
-      for (const job of delayed) {
-        const done = waitForJob(worker, job.id!);
-        await job.changeDelay(0);
-        await done;
-      }
+      const originalDateNow = Date.now;
+      Date.now = () => BIRTHDAY_FIRE_UTC.plus({ minutes: 1 }).toMillis();
 
+      const jobIds  = delayed.map(j => j.id!);
+      const allDone = Promise.all(jobIds.map(id => waitForJob(worker, id)));
+      await Promise.all(delayed.map(j => j.changeDelay(0)));
+      await allDone;
+
+      Date.now = originalDateNow;
+
+      // 1. Log entries
       const log = await readLogFile(logDir);
       expect(countLogEntries(log)).toBe(2);
       expect(log).toContain('Gojo Satoru');
       expect(log).toContain('Nanami Kento');
+
+      // 2. Both users' nextBirthDayAt advanced correctly
+      const gojoAfter   = await userRepo.findById(gojo.id);
+      const nanamiAfter = await userRepo.findById(nanami.id);
+
+      const gojoAdvanced   = DateTime.fromJSDate(gojoAfter!.nextBirthDayAt).setZone('Asia/Tokyo');
+      const nanamiAdvanced = DateTime.fromJSDate(nanamiAfter!.nextBirthDayAt).setZone('Asia/Tokyo');
+
+      // Gojo — Dec 7, should advance to 2027
+      expect(gojoAdvanced.year).toBe(BIRTHDAY_FIRE_UTC.year + 1);
+      expect(gojoAdvanced.month).toBe(12);
+      expect(gojoAdvanced.day).toBe(7);
+      expect(gojoAdvanced.hour).toBe(config.birthdayHour);
+
+      // Nanami — Jul 3, next occurrence after BIRTHDAY_FIRE_UTC (Dec 2026) is Jul 2027
+      expect(nanamiAdvanced.year).toBe(BIRTHDAY_FIRE_UTC.year + 1);
+      expect(nanamiAdvanced.month).toBe(7);
+      expect(nanamiAdvanced.day).toBe(3);
+      expect(nanamiAdvanced.hour).toBe(config.birthdayHour);
+
+      // 3. Two idempotency logs created
+      const logs = await mongoose.connection
+        .collection('reminderlogs')
+        .find({})
+        .toArray();
+      expect(logs).toHaveLength(2);
     });
   });
 });
