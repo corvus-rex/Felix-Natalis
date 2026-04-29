@@ -142,7 +142,7 @@ describe('Birthday Reminder E2E', () => {
 
     const userService    = new UserService(userRepo, reminderQueue);
     const userController = new UserController(userService);
-    app = createApp(userController);
+    app = createApp(userController, infra.redisClient);
   });
 
   afterAll(async () => {

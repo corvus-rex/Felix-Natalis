@@ -1,11 +1,11 @@
-import { Router } from "express";
+import { RequestHandler, Router } from "express";
 import { UserController } from "./controller.js";
 import { idParamValidation, validate, updateSchema, registerSchema } from "./validator.js";
 
-export const userRouter = (controller: UserController): Router => {
+export const userRouter = (controller: UserController, registerRateLimiter: RequestHandler): Router => {
     const router = Router();
 
-    router.post('/register', validate(registerSchema), controller.register);
+    router.post('/register', registerRateLimiter, validate(registerSchema), controller.register);
     router.get('/:id', idParamValidation, controller.getById);
     router.put('/:id', idParamValidation, validate(updateSchema), controller.update);
     router.patch('/deactivate/:id/', idParamValidation, controller.deactivate);

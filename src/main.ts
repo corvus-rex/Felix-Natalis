@@ -54,7 +54,7 @@ switch (config.role) {
     logger.info('Starting API server...');
     const userService    = new UserService(userRepo, reminderQueue);
     const userController = new UserController(userService);
-    const app            = createApp(userController); 
+    const app            = createApp(userController, redis); 
     app.listen(config.port, () => {
       logger.info(`Server running on port ${config.port}`);
     });

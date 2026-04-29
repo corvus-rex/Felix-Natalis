@@ -23,7 +23,7 @@ describe('User Routes (integration)', () => {
     const repo    = new UserRepositoryMongo();
     const service = new UserService(repo, mockQueue as any);
     const ctrl    = new UserController(service);
-    app           = createApp(ctrl);
+    app           = createApp(ctrl, infra.redisClient);
   });
 
   afterAll(async () => {
