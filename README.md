@@ -1,7 +1,7 @@
 # felix-natalis
 ## Birthday Reminder Service
 
-**Technical Documentation** · v1.2.0
+**Technical Documentation** · v1.3.0
 
 *Node.js · TypeScript · MongoDB · Redis · BullMQ*
 

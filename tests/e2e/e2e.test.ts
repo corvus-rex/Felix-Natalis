@@ -52,10 +52,14 @@ const waitForJob = (worker: Worker, jobId: string, timeoutMs = 10_000): Promise<
     worker.on('failed', onFailed);
   });
 
-const readLogFile = async (logDir: string): Promise<string> => {
-  const filePath = path.join(logDir, 'notifications.log');
+const readLogDir = async (logDir: string): Promise<string> => {
   try {
-    return await fs.readFile(filePath, 'utf-8');
+    const files   = await fs.readdir(logDir);
+    const logFiles = files.filter(f => f.endsWith('.log'));
+    const contents = await Promise.all(
+      logFiles.map(f => fs.readFile(path.join(logDir, f), 'utf-8'))
+    );
+    return contents.join('\n');
   } catch {
     return '';
   }
@@ -155,6 +159,12 @@ describe('Birthday Reminder E2E', () => {
   });
 
   afterEach(async () => {
+    const files = await fs.readdir(logDir).catch(() => []);
+    await Promise.all(
+      files
+        .filter(f => f.endsWith('.log'))
+        .map(f => fs.unlink(path.join(logDir, f)))
+    );
     await infra.redisClient.del('locks:cron:birthday');
     await mongoose.connection.collection('users').deleteMany({});
     await mongoose.connection.collection('reminderlogs').deleteMany({});
@@ -174,7 +184,7 @@ describe('Birthday Reminder E2E', () => {
 
       expect(res.status).toBe(400);
 
-      const log = await readLogFile(logDir);
+      const log = await readLogDir(logDir);
       expect(countLogEntries(log)).toBe(0);
     });
 
@@ -438,7 +448,7 @@ describe('Birthday Reminder E2E', () => {
       Date.now = () => originalNow;
 
       // 1. Log file written
-      const log = await readLogFile(logDir);
+      const log = await readLogDir(logDir);
       expect(countLogEntries(log)).toBe(1);
       expect(log).toContain('Gojo Satoru');
       expect(log).toContain('gojo@jujutsu.com');
@@ -490,7 +500,7 @@ describe('Birthday Reminder E2E', () => {
         attemptsMade: 0,
       } as any);
 
-      const log = await readLogFile(logDir);
+      const log = await readLogDir(logDir);
       expect(countLogEntries(log)).toBe(0);
     });
 
@@ -522,7 +532,7 @@ describe('Birthday Reminder E2E', () => {
         attemptsMade: 1,
       } as any);
 
-      const log = await readLogFile(logDir);
+      const log = await readLogDir(logDir);
       expect(countLogEntries(log)).toBe(1);
     });
 
@@ -560,7 +570,7 @@ describe('Birthday Reminder E2E', () => {
       Date.now = originalDateNow;
 
       // 1. Log entries
-      const log = await readLogFile(logDir);
+      const log = await readLogDir(logDir);
       expect(countLogEntries(log)).toBe(2);
       expect(log).toContain('Gojo Satoru');
       expect(log).toContain('Nanami Kento');

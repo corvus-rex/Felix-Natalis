@@ -50,8 +50,8 @@ export class ReminderJobProcessor {
 
       // 5. send notification
       await this.notificationService.notifyBirthday(
-        { name: user.name, email: user.email },
-        locale
+        { userId, name: user.name, email: user.email },
+        locale,
       );
 
       // 6. advance nextBirthDayAt

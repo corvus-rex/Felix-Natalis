@@ -195,7 +195,7 @@ describe('ReminderJobProcessor', () => {
       await processor.process(makeJob() as Job);
 
       expect(mockNotificationService.notifyBirthday).toHaveBeenCalledWith(
-        { name: 'Gojo Satoru', email: 'gojo@jujutsu.com' },
+        { userId: 'userid-123', name: 'Gojo Satoru', email: 'gojo@jujutsu.com' },
         'en'
       );
     });
@@ -213,7 +213,7 @@ describe('ReminderJobProcessor', () => {
       await processor.process(makeJob() as Job);
 
       expect(mockNotificationService.notifyBirthday).toHaveBeenCalledWith(
-        { name: 'Gojo Satoru', email: 'gojo@jujutsu.com' },
+        { userId: 'userid-123', name: 'Gojo Satoru', email: 'gojo@jujutsu.com' },
         expect.any(String)
       );
     });

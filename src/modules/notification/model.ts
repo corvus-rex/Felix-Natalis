@@ -4,6 +4,7 @@ export interface NotificationMessage {
 }
 
 export interface NotificationRecipient {
+  userId: string;
   name:  string;
   email: string;
 }
