@@ -49,7 +49,7 @@ export class ReminderQueue implements IReminderQueue {
     const bulkJobs = jobs.map(({ data, delay }) => {
       const normalizedData = this.normalizeJobData(data);
       return {
-        name: 'send-reminder',
+        name: config.queueName,
         data: normalizedData,
         opts: {
           delay,

@@ -27,11 +27,11 @@ export const runSchedulerTick = async (
   userRepo: IUserRepository,
   queue:    IReminderQueue,
   lockTtlMs: number,
+  now: DateTime = DateTime.utc(),
 ): Promise<void> => {
   let lock;
   try {
     lock = await redlock.acquire(['locks:cron:birthday'], lockTtlMs);
-    const now       = DateTime.utc();
     const windowEnd = now.plus({ hours: LOOKAHEAD_HOURS });
 
     logger.info('birthday scheduler started', {
@@ -114,6 +114,6 @@ export const startBirthdayScheduler = (
   });
 
   cron.schedule(cronExpression, () =>
-    runSchedulerTick(redlock, userRepo, queue, lockTtlMs)
+    runSchedulerTick(redlock, userRepo, queue, lockTtlMs, DateTime.utc())
   );
 };
