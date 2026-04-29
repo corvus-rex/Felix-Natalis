@@ -251,13 +251,14 @@ All configuration is read from environment variables. Required variables throw a
 | REDIS_URL                  | Yes      | -          | Redis connection URI                                           |
 | ROLE                       | No       | api        | Runtime role: api \| scheduler \| worker                       |
 | PORT                       | No       | 3000       | HTTP server port                                               |
-| DB_POOL_SIZE               | No       | 10         | Mongoose connection pool size                                  |
+| DB_POOL_SIZE               | No       | 15         | Mongoose connection pool size                                  |
 | SERVER_SEL_TIMEOUT         | No       | 5000       | MongoDB server selection timeout (ms)                          |
 | QUEUE_NAME                 | No       | reminder   | BullMQ queue name                                              |
 | BIRTHDAY_HOUR              | No       | 9          | Hour (0-23) at which birthday notifications fire               |
 | LOG_FILE_DIR               | No       | ../../logs | Directory for LogFileChannel output                            |
 | SCHEDULING_FREQUENCY_HOURS | No       | 1          | Scheduler tick interval in hours. Accepted values: 1, 2, 3, 6. |
 | QUERY_BATCH_SIZE           | No       | 420        | Maximum number of users fetched per query. Implements cursor.  |
+| WORKER_CONCURRENCY         | No       | 5          | Number of jobs processed simultaneously per worker instance. DB_POOL_SIZE should be set to at least WORKER_CONCURRENCY × 3 to avoid connection pool exhaustion. |
 ---
 
 ## 8. Testing

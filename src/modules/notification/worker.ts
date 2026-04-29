@@ -82,7 +82,7 @@ export const startWorker = (
   const worker = new Worker<ReminderJobData>(
     config.queueName,
     (job) => processor.process(job), 
-    { connection: redis, concurrency: 5 }
+    { connection: redis, concurrency: config.workerConcurrency }
   );
 
   const events = new QueueEvents(config.queueName, { connection: redis });

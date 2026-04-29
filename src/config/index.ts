@@ -1,3 +1,4 @@
+import { worker } from "node:cluster";
 import { query } from "winston";
 
 const required = (key: string): string => {
@@ -12,7 +13,7 @@ export const config = {
   dbType:        required('DB_TYPE'),
   dbName:        required('DB_NAME'),
   mongoUri:      required('MONGO_URL'),
-  dbPoolSize:    Number(process.env.DB_POOL_SIZE) || 10,
+  dbPoolSize:    Number(process.env.DB_POOL_SIZE) || 15,
   serverTimeout: Number(process.env.SERVER_SEL_TIMEOUT) || 5000,
   redisUrl:      required('REDIS_URL'),
   channel : {
@@ -22,4 +23,5 @@ export const config = {
   birthdayHour:  parseInt(process.env.BIRTHDAY_HOUR || '9'),
   schedulingFrequency: parseInt(process.env.SCHEDULING_FREQUENCY || '1'), // in hours
   queryBatchSize: parseInt(process.env.QUERY_BATCH_SIZE || '420'),
+  workerConcurrency: parseInt(process.env.WORKER_CONCURRENCY || '5'),
 };
