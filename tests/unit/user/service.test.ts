@@ -4,7 +4,7 @@ import { IReminderQueue } from '../../../src/modules/reminder/model';
 import { UserError } from '../../../src/modules/user/error';
 import { User } from '../../../src/modules/user/model';
 import * as birthdayUtils from '../../../src/modules/reminder/birthdayUtils';
-import { remove } from 'winston';
+import { add, remove } from 'winston';
 
 // ─────────────────────────────────────────────
 // Shared Fixtures
@@ -54,7 +54,6 @@ describe('UserService', () => {
       create: jest.fn(),
       findById: jest.fn(),
       findByEmail: jest.fn(),
-      findActive: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
       findUsersWithBirthdayBetween: jest.fn(),
@@ -63,6 +62,7 @@ describe('UserService', () => {
     mockQueue = {
       add: jest.fn(),
       removeById: jest.fn(),
+      addBulk: jest.fn(),
       removeBirthdayReminder: jest.fn().mockResolvedValue(undefined),
     };
 

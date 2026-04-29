@@ -55,7 +55,6 @@ describe('ReminderJobProcessor', () => {
       create:                       jest.fn(),
       findById:                     jest.fn(),
       findByEmail:                  jest.fn(),
-      findActive:                   jest.fn(),
       update:                       jest.fn(),
       delete:                       jest.fn(),
       findUsersWithBirthdayBetween: jest.fn(),

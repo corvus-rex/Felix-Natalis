@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { IUserRepository } from '../../modules/user/repository.js';
 import { User, InsertUserDTO, UpdateUserDTO } from '../../modules/user/model.js';
+import { config } from '../../config/index.js';
 
 interface UserDocument extends Document {
   name: string;
@@ -58,11 +59,6 @@ export class UserRepositoryMongo implements IUserRepository {
     return doc ? toUser(doc) : null;
   }
 
-  async findActive(): Promise<User[]> {
-    const docs = await UserModel.find({ active: true }).lean();
-    return docs.map(toUser);
-  }
-
   async update(id: string, fields: UpdateUserDTO): Promise<User | null> {
     const doc = await UserModel.findByIdAndUpdate(
       id,
@@ -77,14 +73,21 @@ export class UserRepositoryMongo implements IUserRepository {
     await UserModel.findByIdAndDelete(id);
   }
 
-  async findUsersWithBirthdayBetween(from: Date, to: Date): Promise<User[]> {
-    const docs = await UserModel.find({
+  async findUsersWithBirthdayBetween(from: Date, to: Date, cursor?: string): Promise<User[]> {
+    const query: any = {
       active: true,
-      nextBirthDayAt: {
-        $gte: from,
-        $lte: to,
-      },
-    }).sort({ nextBirthDayAt: 1 }).lean();
+      nextBirthDayAt: { $gte: from, $lte: to },
+    };
+
+    if (cursor) {
+      query._id = { $gt: new mongoose.Types.ObjectId(cursor) };
+    }
+
+    const docs = await UserModel
+      .find(query)
+      .sort({ _id: 1 })
+      .limit(config.queryBatchSize)
+      .lean();
 
     return docs.map(toUser);
   }

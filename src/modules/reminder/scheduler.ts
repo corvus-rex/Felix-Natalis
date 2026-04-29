@@ -1,94 +1,119 @@
 import cron from 'node-cron';
 import { DateTime } from 'luxon';
 import type Redlock from 'redlock';
-
 import { IUserRepository } from '../user/repository.js';
-import { IReminderQueue } from './model.js';
+import { IReminderQueue, ReminderJobData } from './model.js';
 import { logger } from '../../infrastructure/logger.js';
 import { config } from '../../config/index.js';
 
+const LOOKAHEAD_HOURS = 8;
+
 export const toCronExpression = (frequencyHours: number): string => {
   switch (frequencyHours) {
-    case 1:  return '0 * * * *';       // every hour
-    case 2:  return '0 */2 * * *';     // every 2 hours
-    case 3:  return '0 */3 * * *';     // every 3 hours
-    case 6:  return '0 */6 * * *';     // every 6 hours
+    case 1:  return '0 * * * *';
+    case 2:  return '0 */2 * * *';
+    case 3:  return '0 */3 * * *';
+    case 6:  return '0 */6 * * *';
     default:
       logger.warn(`unsupported schedulingFrequency ${frequencyHours}h, falling back to hourly`);
       return '0 * * * *';
   }
 };
 
+const toLockTtlMs = 120_000; 
 
-export const startBirthdayScheduler = (
-  redlock: Redlock,
+export const runSchedulerTick = async (
+  redlock:  Redlock,
   userRepo: IUserRepository,
-  queue: IReminderQueue,
-): void => {
-    
-  const cronExpression = toCronExpression(config.schedulingFrequency);
-  cron.schedule(cronExpression, async () => {
-    let lock;
+  queue:    IReminderQueue,
+  lockTtlMs: number,
+  now: DateTime = DateTime.utc(),
+): Promise<void> => {
+  let lock;
+  try {
+    lock = await redlock.acquire(['locks:cron:birthday'], lockTtlMs);
+    const windowEnd = now.plus({ hours: LOOKAHEAD_HOURS });
 
-    try {
-      lock = await redlock.acquire(['locks:cron:birthday'], 60_000);
+    logger.info('birthday scheduler started', {
+      from: now.toISO(),
+      to:   windowEnd.toISO(),
+    });
 
-      const now = DateTime.utc();
-      const next8Hours = now.plus({ hours: 8 });
+    let cursor:       string | undefined = undefined;
+    let totalEnqueued = 0;
 
-      // only fetch users whose next birthday is within next 8 hours
+    do {
       const users = await userRepo.findUsersWithBirthdayBetween(
         now.toJSDate(),
-        next8Hours.toJSDate()
+        windowEnd.toJSDate(),
+        cursor,
       );
 
-      logger.info('birthday scheduler started', {
-        count: users.length,
-        from: now.toISO(),
-        to: next8Hours.toISO(),
-      });
+      if (users.length === 0) break;
 
-      for (const user of users) {
-        const scheduledAt = DateTime
-          .fromJSDate(user.nextBirthDayAt)
-          .toUTC()
-          .toISO();
-
+      const jobs = users.flatMap(user => {
+        const scheduledAt = DateTime.fromJSDate(user.nextBirthDayAt).toUTC().toISO();
         if (!scheduledAt) {
-          logger.warn('invalid nextBirthDayAt, skipping user', {
-            userId: user.id,
-          });
-          continue;
+          logger.warn('invalid nextBirthDayAt, skipping user', { userId: user.id });
+          return [];
         }
-
         const delay = DateTime
           .fromJSDate(user.nextBirthDayAt)
           .toUTC()
           .diff(now, 'milliseconds')
           .milliseconds;
 
-        if (delay <= 0) {
-          continue;
-        }
+        if (delay <= 0) return [];
 
-        await queue.add({userId: user.id, type: 'birthday', scheduledAt}, delay);
-      }
-
-      logger.info('birthday scheduler complete', {
-        count: users.length,
+        const jobData: ReminderJobData = {
+          userId: user.id,
+          type:   'birthday',
+          scheduledAt,
+        };
+        return [{ data: jobData, delay }];
       });
 
-    } catch (err) {
-      logger.warn('scheduler failed or lock not acquired', {err,});
+      if (jobs.length > 0) {
+        await queue.addBulk(jobs);
+        totalEnqueued += jobs.length;
+      }
 
-    } finally {
-      if (lock) {
-        try {
-          await lock.unlock();
-        } catch (err) {
-          logger.error('failed to release lock', {err});
-        }
+      cursor = users.length === config.queryBatchSize
+        ? users[users.length - 1].id
+        : undefined;
+
+    } while (cursor !== undefined);
+
+    logger.info('birthday scheduler complete', { totalEnqueued });
+
+  } catch (err) {
+    logger.warn('scheduler failed or lock not acquired', { err });
+  } finally {
+    if (lock) {
+      try {
+        await lock.unlock();
+      } catch (err) {
+        logger.error('failed to release lock', { err });
       }
     }
+  }
+};
+
+export const startBirthdayScheduler = (
+  redlock:  Redlock,
+  userRepo: IUserRepository,
+  queue:    IReminderQueue,
+): void => {
+  const cronExpression = toCronExpression(config.schedulingFrequency);
+  const lockTtlMs      = toLockTtlMs;
+
+  logger.info('birthday scheduler initialized', {
+    frequencyHours: config.schedulingFrequency,
+    cronExpression,
+    lockTtlMs,
   });
+
+  cron.schedule(cronExpression, () =>
+    runSchedulerTick(redlock, userRepo, queue, lockTtlMs, DateTime.utc())
+  );
 };

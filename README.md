@@ -1,7 +1,7 @@
 # felix-natalis
 ## Birthday Reminder Service
 
-**Technical Documentation** · v1.0.0
+**Technical Documentation** · v1.2.0
 
 *Node.js · TypeScript · MongoDB · Redis · BullMQ*
 
@@ -243,21 +243,21 @@ Idempotency store. One document per `(userId, scheduledAt)` pair. Unique compoun
 
 All configuration is read from environment variables. Required variables throw at startup if missing.
 
-| Variable           | Required | Default    | Description                                               |
-|--------------------|----------|------------|-----------------------------------------------------------|
-| DB_TYPE            | Yes      | -          | Database type identifier                                  |
-| DB_NAME            | Yes      | -          | MongoDB database name                                     |
-| MONGO_URL          | Yes      | -          | MongoDB connection URI                                    |
-| REDIS_URL          | Yes      | -          | Redis connection URI                                      |
-| ROLE               | No       | api        | Runtime role: api \| scheduler \| worker                 |
-| PORT               | No       | 3000       | HTTP server port                                          |
-| DB_POOL_SIZE       | No       | 10         | Mongoose connection pool size                             |
-| SERVER_SEL_TIMEOUT | No       | 5000       | MongoDB server selection timeout (ms)                     |
-| QUEUE_NAME         | No       | reminder   | BullMQ queue name                                         |
-| BIRTHDAY_HOUR      | No       | 9          | Hour (0-23) at which birthday notifications fire          |
-| LOG_FILE_DIR       | No       | ../../logs | Directory for LogFileChannel output                       |
-| SCHEDULING_FREQUENCY_HOURS| No       | 1          | Scheduler tick interval in hours. Accepted values: 1, 2, 3, 6. |
-
+| Variable                   | Required | Default    | Description                                                    |
+|----------------------------|----------|------------|----------------------------------------------------------------|
+| DB_TYPE                    | Yes      | -          | Database type identifier                                       |
+| DB_NAME                    | Yes      | -          | MongoDB database name                                          |
+| MONGO_URL                  | Yes      | -          | MongoDB connection URI                                         |
+| REDIS_URL                  | Yes      | -          | Redis connection URI                                           |
+| ROLE                       | No       | api        | Runtime role: api \| scheduler \| worker                       |
+| PORT                       | No       | 3000       | HTTP server port                                               |
+| DB_POOL_SIZE               | No       | 10         | Mongoose connection pool size                                  |
+| SERVER_SEL_TIMEOUT         | No       | 5000       | MongoDB server selection timeout (ms)                          |
+| QUEUE_NAME                 | No       | reminder   | BullMQ queue name                                              |
+| BIRTHDAY_HOUR              | No       | 9          | Hour (0-23) at which birthday notifications fire               |
+| LOG_FILE_DIR               | No       | ../../logs | Directory for LogFileChannel output                            |
+| SCHEDULING_FREQUENCY_HOURS | No       | 1          | Scheduler tick interval in hours. Accepted values: 1, 2, 3, 6. |
+| QUERY_BATCH_SIZE           | No       | 420        | Maximum number of users fetched per query. Implements cursor.  |
 ---
 
 ## 8. Testing
@@ -269,7 +269,7 @@ The test suite is split into three layers, each run in isolation with `--runInBa
 Pure logic tests with no I/O. All dependencies are mocked.
 
 - `notification/service.test.ts` - fan-out and locale resolution
-- `notification/worker.test.ts` - processor steps: skip-if-deleted, idempotency, notify, advance date, Leap year handling
+- `notification/worker.test.ts` - processor steps: skip-if-deleted, idempotency, notify, advance date, leap year handling
 - `reminder/scheduler.test.ts` - window calculation, inactive user exclusion, delay guard
 - `user/controller.test.ts` - HTTP request/response mapping
 - `user/service.test.ts` - register, update, deactivate business rules

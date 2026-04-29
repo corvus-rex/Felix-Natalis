@@ -1,3 +1,5 @@
+import { query } from "winston";
+
 const required = (key: string): string => {
   const value = process.env[key];
   if (!value) throw new Error(`Missing required env var: ${key}`);
@@ -19,4 +21,5 @@ export const config = {
   queueName:     process.env.QUEUE_NAME || 'reminder',
   birthdayHour:  parseInt(process.env.BIRTHDAY_HOUR || '9'),
   schedulingFrequency: parseInt(process.env.SCHEDULING_FREQUENCY || '1'), // in hours
+  queryBatchSize: parseInt(process.env.QUERY_BATCH_SIZE || '420'),
 };
