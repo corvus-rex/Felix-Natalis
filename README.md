@@ -190,7 +190,7 @@ Fan-out: calls `channel.send()` on all registered channels concurrently via `Pro
 
 ### LogFileChannel
 
-Appends a formatted entry to `notifications.log` in the configured log directory. Each entry is delimited by `-----` and `--------------` markers. Multiple locale are supported for future-proofing, for now only 'en' locale is supported.
+Appends a formatted entry to separate log files in the configured log directory. Each entry is delimited by `-----` and `--------------` markers. Multiple locale are supported for future-proofing, for now only 'en' locale is supported.
 
 ```
 -----
