@@ -299,7 +299,7 @@ Full stack: real containers, real HTTP via Supertest, real worker consuming real
 | Suite                | What it verifies                                                              |
 |----------------------|-------------------------------------------------------------------------------|
 | Validation           | Missing fields, invalid email/timezone/birthday → 400                         |
-| Registration -> DB    | User persisted with correct nextBirthDayAt                                    |
+| Registration -> DB   | User persisted with correct nextBirthDayAt                                    |
 | Registration 409     | Duplicate email rejected, only one user in DB                                 |
 | Scheduler tick       | Only active users in 8h window are enqueued; past and out-of-window users skipped |
 | Scheduler idempotency | Two consecutive ticks do not double-enqueue the same user                    |
